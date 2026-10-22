@@ -1,0 +1,9 @@
+# saídas (regeráveis; ver resultados/<dataset>/dados/execucao.txt p/ a configuração de cada execução)
+resultados/
+
+# Python
+__pycache__/
+*.pyc
+
+# Claude Code (local)
+.claude/
