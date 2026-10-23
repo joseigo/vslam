@@ -87,6 +87,7 @@ dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban30/stereo_left"
 # dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban33/stereo_left"
 # dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban34/stereo_left"
 # dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban38/stereo_left/stereo_left"
+dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban39/stereo_left"
 
 # dataset_path = "/home/joseigo/Documentos/TCC/dataset_inomi/dataset_08_08_16_0"
 # dataset_path = "/home/joseigo/Documentos/TCC/dataset_inomi/dataset_16_0_0_16"

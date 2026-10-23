@@ -21,6 +21,7 @@ escala no grafo; robustez: porta de deriva + PCM incremental (online) e GNC-TLS 
 import argparse
 import glob
 import os
+import sys
 import time
 
 import testE_vo_time_satmp as base           # (configura BLAS c/ 1 thread antes do numpy)
@@ -31,6 +32,8 @@ from GPO import GPOConfig, WheelOdometry, PoseOdometry, ImuData, image_stamp_ns
 from Fusion import OnlineFusion
 from LoopClosure import LoopClosure, LoopConfig
 from test_gpo import load_gt, simulate_imu, evaluate, save_tum
+sys.path.insert(0, os.path.join(base.CODES_DIR, "ferramentas"))
+import avaliar_evo                          # noqa: E402  (avaliação com o evo -> resultados/<dataset>/evo/)
 
 # ------------------------------------------------------------------ CONFIGURAÇÃO
 dataset_path = base.dataset_path    # imagens (mesmo do testE_vo_time_satmp.py); a raiz do dataset é achada a partir dela
@@ -1044,6 +1047,18 @@ def main():
             m = t >= t0 - 1e-6
             if m.sum() >= 3:
                 rows[name] = describe(t[m], T[m], t_gt, T_gt, origin, with_scale=sc)
+        # evo: TUM padrão (s), referencial do veículo, mesmo trecho [t0, fim] -> resultados/<dataset>/evo/
+        evo_dir = os.path.join(out_dir, "evo")
+        os.makedirs(evo_dir, exist_ok=True)
+        t_end = float(np.max([c[1][-1] for c in cand]))
+        mg = (t_gt >= t0 - 0.05) & (t_gt <= t_end + 0.05)
+        avaliar_evo.write_tum(os.path.join(evo_dir, "gt.txt"), t_gt[mg], T_gt[mg])
+        evo_names = {VO_PURE: "vo", VO_FB: "vo", "fusão online": "fusao_online", "fusão suavizada": "fusao_suavizada",
+                     "só roda": "so_roda"}
+        for name, t, T, sc in cand:
+            m = t >= t0 - 1e-6
+            if m.sum() >= 3:
+                avaliar_evo.write_tum(os.path.join(evo_dir, f"{evo_names.get(name, _slug(name))}.txt"), t[m], T[m])
 
         print(f"\nPercurso (GT, a partir de t0): {rows['fusão online']['length']:.0f} m")
         print(f"{'':18s} {'ATE [m]':>8s} {'RMSE anc. [m]':>13s} {'erro final [m]':>14s} {'deriva %':>8s} "
@@ -1073,6 +1088,10 @@ def main():
         figs.append(plot_revisits(rv, covered, rec, loops, t0, origin, title, args.out))
         print("Figuras: " + ", ".join(figs))
         save_figure_data(dados_dir, rows, rpe, rv, covered, loops, t0, origin, nt, sc, vo_lost_t)
+        try:
+            avaliar_evo.avaliar(out_dir)
+        except Exception as e:                      # evo é opcional: não derruba a execução
+            print(f"[evo] avaliação não feita ({type(e).__name__}: {e})")
         if lc is not None and lc.stats.get('log'):
             fig_f = loop_funnel(lc.stats['log'], loops, t_gt, T_gt, rv, t0, title, args.out, dados_dir,
                                 LoopConfig().min_f_inliers, args.node_dt)

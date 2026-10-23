@@ -59,7 +59,9 @@ Cada execução gera métricas e figuras contra o GT: ATE e RMSE ancorado, erro 
 RPE por comprimento de segmento (protocolo KITTI), precisão dos laços, **funil do detector de laço** (onde cada
 consulta para e se o candidato era verdadeiro), **cobertura das revisitas** (mesmo sentido / sentido oposto, pelo
 GT), **tempo de processamento** por componente (orçamento de tempo real, crescimento com o mapa, atraso do grafo),
-mapas 3D (no referencial do VO e no fundido, em metros) e GIFs para apresentação.
+mapas 3D (no referencial do VO e no fundido, em metros) e GIFs para apresentação. As trajetórias também são
+avaliadas com o [evo](https://github.com/MichaelGrupp/evo) (APE com alinhamento SE(3)/Sim(3) e RPE em segmentos
+de 100 m), cujo APE coincide com o ATE calculado pelo pipeline.
 
 ## Dados
 
@@ -84,6 +86,7 @@ Codes/
 │   ├── testE_vo_time_satmp.py    só a odometria visual; configuração de câmera e parâmetros
 │   └── test_gpo.py               fusão offline a partir de uma trajetória do VO salva
 ├── ferramentas/    análise
+│   ├── avaliar_evo.py            avaliação com o evo (APE/RPE) -> resultados/<dataset>/evo/
 │   ├── make_gifs.py              GIFs para apresentação a partir de uma execução
 │   └── view_map.py               visualizador 3D dos mapas salvos
 └── vocabularios/   vocabulários ORB do fechamento de laço
