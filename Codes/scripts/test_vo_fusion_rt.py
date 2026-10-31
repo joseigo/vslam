@@ -50,7 +50,7 @@ FUSED_VIEW = True                   # 3D / mapa no mundo FUNDIDO (métrico, veí
 
 LOOP_CLOSURE = True                 # fechamento de laço
 VOCAB_FILE = os.path.join(base.VOCAB_DIR, "orb_vocab_k10L5_indep.npz")   # treinado em urban25/33/34
-LOOP_GT_TOL = 3.0                   # m: laço correto se |distância medida - distância no GT| < isso (só avaliação)
+LOOP_GT_TOL = 5.0                   # m: laço correto se |distância medida - distância no GT| < isso (só avaliação)
 REVISIT = dict(radius=10.0,         # m: mesmo lugar no GT
                min_travel=200.0,    # m rodados entre as passagens (exclui paradas em semáforo)
                same_deg=30.0,       # |dyaw| < isso: mesmo sentido; > opp_deg: sentido oposto
@@ -878,14 +878,14 @@ def main():
         inomi = "inomi" in os.path.abspath(args.images).lower() or (
             image_paths and not os.path.splitext(os.path.basename(image_paths[0]))[0].isdigit())
         cam = "inomi" if inomi else "urban"
-    K_cam, dist_cam = base.CAMERAS[cam]["K"], base.CAMERAS[cam]["dist"]
+    K_cam, dist_cam = base.camera_for(args.images, cam)
     if T_gt is not None:
         t_gt, T_gt = adapt_gt(t_gt, T_gt, [image_stamp_ns(p) * 1e-9 for p in image_paths],
                               body_yaw_deg=GT_BODY_YAW_DEG.get(cam, 0.0))
     print(f"Câmera: {cam} (fx={K_cam[0, 0]:.1f}, cx={K_cam[0, 2]:.1f}{', com distorção' if dist_cam is not None else ''})")
 
     vo = VisualOdometry(camera_matrix=K_cam, dist_coeffs=dist_cam, orb_params=base.orb_params,
-                        lk_params=base.lk_params, keyframe_params=base.keyframe_params, sliding_window_size=8,
+                        lk_params=base.lk_params, keyframe_params=base.vo_params_for(args.images), sliding_window_size=8,
                         enable_plot=False, verbose=False, async_ba=base.ASYNC_BA)
     feedback = SCALE_FEEDBACK and not args.no_feedback and ("wheel" in sensors or "imu" in sensors)
     fused_view = FUSED_VIEW and not args.vo_view

@@ -980,8 +980,11 @@ class VisualOdometry:
         self._ext_scale = None
         piv = self._apply_scale(s, self.cur_kf_id, full=whole, whole_window=True)
         # a âncora do chão passa a seguir a escala externa (não briga com ela), mas continua agindo: as alturas já
-        # medidas são convertidas p/ as unidades novas (zerar o buffer a cada correção a deixaria inativa)
-        if self.ground_ref is not None:
+        # medidas são convertidas p/ as unidades novas (zerar o buffer a cada correção a deixaria inativa).
+        # Altura real dada (camera_height) e ainda sem o 1º alinhamento: ground_ref está em METROS, não em unidades do
+        # mapa -> não acompanha a escala externa (senão a âncora passa a buscar uma altura s vezes maior e briga com
+        # a fusão: urban30 teve escala x8 / x0.1 / x3.6 em segmentos seguidos)
+        if self.ground_ref is not None and (self.camera_height is None or self.ground_aligned):
             self.ground_ref *= s
         self._ground_buf = [h * s for h in self._ground_buf]
         self.unit_events.append((self.keyframes_dict[piv].frame_idx, float(np.log(s)), self.segment))

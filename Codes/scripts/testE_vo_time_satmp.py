@@ -23,12 +23,15 @@ from Viewer import FrameViewer, Open3DViewer, plot_snapshot, draw_snapshot
 # ------------------------------------------------------------------
 # No arquivo antigo, K_camera (urban, cx=608) era usada junto com dist_coeffs calculados para
 # OUTRA câmera (cx=366, dataset_inomi). Misturar os dois distorce a geometria.
+# No KAIST a calibração vem de <dataset>/calibration/left.yaml (load_calibration); "urban" abaixo é só o fallback
+# (= left.yaml do urban25-34; urban38/39 têm OUTRA calibração). Sem a distorção a escala do VO cresce sem parar
+# (urban39: ATE 71 -> 17 m em 2.8 km só por corrigi-la).
 CAMERAS = {
     "urban": dict(
         K=np.array([[816.9037899277, 0.505101667, 608.5072628169],
                     [0., 811.5680382849, 263.4759976444],
                     [0., 0., 1.]]),
-        dist=None,           # se tiver os coeficientes da câmera esquerda do urban, coloque aqui
+        dist=np.array([-0.0561430278, 0.1395256320, -0.0012155907, -0.0009728139, -0.0808781688]),
         height=None),        # altura REAL da câmera sobre o chão (m). Se souber, coloque: o mapa fica em escala métrica
     "inomi": dict(
         K=np.array([[764.95638737, 0., 366.51531468],
@@ -42,6 +45,62 @@ CAMERA = "urban"
 K_camera = CAMERAS[CAMERA]["K"]
 dist_coeffs = CAMERAS[CAMERA]["dist"]
 CAMERA_HEIGHT = CAMERAS[CAMERA]["height"]
+
+
+def load_calibration(images_dir, name="left.yaml", max_up=4):
+    """(K, dist, caminho) de <dataset>/calibration/<name> (formato OpenCV/ROS do KAIST), procurado subindo a partir
+    da pasta das imagens (urban38/stereo_left/stereo_left -> urban38/calibration). None se não houver."""
+    d = os.path.abspath(images_dir)
+    for _ in range(max_up + 1):
+        path = os.path.join(d, "calibration", name)
+        if os.path.isfile(path):
+            fs = cv2.FileStorage(path, cv2.FILE_STORAGE_READ)
+            K = fs.getNode("camera_matrix").mat()
+            dist = fs.getNode("distortion_coefficients").mat()
+            fs.release()
+            if K is None or K.shape != (3, 3):
+                return None
+            dist = None if dist is None or not np.any(dist) else dist.reshape(-1).astype(np.float64)
+            return K.astype(np.float64), dist, path
+        d = os.path.dirname(d)
+    return None
+
+
+def camera_height_for(images_dir, max_up=4):
+    """Altura da câmera sobre o chão (m) = z de calibration/Vehicle2Stereo.txt (KAIST: o referencial do veículo fica
+    NO CHÃO, sob o eixo traseiro, z p/ cima). None se não houver o arquivo."""
+    d = os.path.abspath(images_dir)
+    for _ in range(max_up + 1):
+        path = os.path.join(d, "calibration", "Vehicle2Stereo.txt")
+        if os.path.isfile(path):
+            with open(path) as f:
+                for line in f:
+                    if line.startswith("T:"):
+                        return float(line.split()[3])
+            return None
+        d = os.path.dirname(d)
+    return None
+
+
+def vo_params_for(images_dir):
+    """keyframe_params com a altura real da câmera (escala métrica) quando CAMERA_HEIGHT não foi dada à mão."""
+    kp = dict(keyframe_params)
+    if kp.get('camera_height') is None:
+        h = camera_height_for(images_dir)
+        if h is not None:
+            kp['camera_height'] = h
+            print(f"Altura da câmera (Vehicle2Stereo): {h:.3f} m -> VO em escala métrica")
+    return kp
+
+
+def camera_for(images_dir, cam):
+    """(K, dist) do dataset: calibration/left.yaml se existir, senão o perfil fixo CAMERAS[cam]."""
+    calib = load_calibration(images_dir)
+    if calib is not None:
+        print(f"Calibração: {calib[2]}")
+        return calib[0], calib[1]
+    print(f"Calibração: perfil fixo '{cam}' (não achei calibration/left.yaml)")
+    return CAMERAS[cam]["K"], CAMERAS[cam]["dist"]
 
 # ------------------------------------------------------------------
 # PARÂMETROS
@@ -155,12 +214,13 @@ def run_dataset_test(path=dataset_path, enable_plot=True):
         print(f"Nenhuma imagem encontrada em {path}")
         return
 
+    K_cam, dist_cam = camera_for(path, CAMERA)
     vo = VisualOdometry(
-        camera_matrix=K_camera,
-        dist_coeffs=dist_coeffs,
+        camera_matrix=K_cam,
+        dist_coeffs=dist_cam,
         orb_params=orb_params,
         lk_params=lk_params,
-        keyframe_params=keyframe_params,
+        keyframe_params=vo_params_for(path),
         sliding_window_size=8,
         enable_plot=False,      # a visualização ao vivo roda no Open3DViewer (outro processo)
         verbose=True,
@@ -169,7 +229,7 @@ def run_dataset_test(path=dataset_path, enable_plot=True):
 
     print(f"\nProcessando {len(image_paths)} imagens usando timestamp do nome do arquivo...")
     frame_view = FrameViewer(max_fps=WINDOW_MAX_FPS) if SHOW_WINDOW else None
-    view3d = Open3DViewer(K=K_camera, max_fps=VIEW3D_MAX_FPS, points_every=VIEW3D_POINTS_EVERY) \
+    view3d = Open3DViewer(K=K_cam, max_fps=VIEW3D_MAX_FPS, points_every=VIEW3D_POINTS_EVERY) \
         if enable_plot and SHOW_3D else None
 
     if CV_THREADS is not None:
