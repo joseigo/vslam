@@ -196,12 +196,12 @@ def _taxa_volta_com_chute(vo, g0, g1, pts, init):
 
 def _fig_klt(dxs, atual, proposta):
     fig, ax = nova_figura(w=5.2, h=3.2)
-    ax.plot(dxs, 100 * np.asarray(atual), "o-", color=COR['rejeitado'], ms=5, label="atual (volta sem chute)")
-    ax.plot(dxs, 100 * np.asarray(proposta), "s-", color=COR['vo'], ms=5, label="volta com chute p0 (proposta)")
+    ax.plot(dxs, 100 * np.asarray(atual), "o-", color=COR['rejeitado'], ms=5, label="atual (rastreio reverso sem estimativa inicial)")
+    ax.plot(dxs, 100 * np.asarray(proposta), "s-", color=COR['vo'], ms=5, label="proposta (rastreio reverso com estimativa inicial p0)")
     ax.set_ylim(0, 105)
     ax.set_xlabel("deslocamento horizontal da imagem [px] (com fluxo previsto)")
-    ax.set_ylabel("tracks mantidos [%]")
-    ax.set_title("KLT + checagem forward-backward")
+    ax.set_ylabel("features rastreadas mantidas [%]")
+    ax.set_title("KLT com verificação forward-backward")
     ax.legend(loc="lower left")
     fig.tight_layout()
     salvar_figura(fig, "vo_klt_deslocamento_grande")

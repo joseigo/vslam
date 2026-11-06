@@ -45,7 +45,7 @@ import matplotlib.pyplot as plt
 from Map import Map
 from KeyFrame import KeyFrame
 from Viewer import plot_snapshot, draw_snapshot
-from BA import run_bundle_adjustment, snapshot_ba_problem, solve_ba, apply_ba_result, warmup as _ba_warmup
+from BA import run_bundle_adjustment, snapshot_ba_problem, solve_ba, apply_ba_result, scale_prior, warmup as _ba_warmup
 
 
 
@@ -128,6 +128,9 @@ class VisualOdometry:
         self.max_lost = int(kp.get('max_lost', 5))
         self.init_scale = float(kp.get('init_scale', 1.0))
         self.ba_fixed = int(kp.get('ba_fixed', 2))
+        # gauge do BA: 'fix' = fixa os ba_fixed KFs mais antigos da janela; 'marg' = marginaliza o KF que sai (BA.py)
+        self.ba_marg = str(kp.get('ba_mode', 'fix')) == 'marg'
+        self.ba_prior: Optional[dict] = None         # (marg) prior marginal do último BA
         # limitador de passo (anti-inflação de escala em curvas): |passo| <= max_step_ratio * velocidade_ref
         self.max_step_ratio = float(kp.get('max_step_ratio', 1.6))
         self.speed_min_inliers = int(kp.get('speed_min_inliers', 40))   # só atualiza a vel. ref. com PnP saudável
@@ -714,9 +717,12 @@ class VisualOdometry:
                 self._poll_ba(wait=True)     # incorpora e já reenvia com a janela atual (pendente)
         else:
             if len(self.window) >= self.ba_fixed + 1:
-                ok = run_bundle_adjustment(self.Map, self.keyframes_dict, self.K, list(self.window),
-                                           n_fixed=self.ba_fixed, verbose=self.verbose, **self._ba_kw)
-                if ok:
+                res = run_bundle_adjustment(self.Map, self.keyframes_dict, self.K, list(self.window),
+                                            n_fixed=self.ba_fixed, verbose=self.verbose, prior=self.ba_prior,
+                                            marg=self.ba_marg, **self._ba_kw)
+                if res is not None:
+                    if self.ba_marg:
+                        self.ba_prior = res.get('prior')
                     self._sync_poses_after_ba()
             self._purge_invalid_tracks()
             self._ground_scale_update(kid)
@@ -751,7 +757,8 @@ class VisualOdometry:
         self._ba_pending = False
         if len(self.window) < self.ba_fixed + 1:
             return
-        problem = snapshot_ba_problem(self.Map, list(self.window), self.ba_fixed)
+        problem = snapshot_ba_problem(self.Map, list(self.window), self.ba_fixed, prior=self.ba_prior,
+                                      marg=self.ba_marg)
         if problem is None:
             return
         fut = self._ba_pool.submit(solve_ba, problem, self.K, verbose=self.verbose, **self._ba_kw)
@@ -785,6 +792,8 @@ class VisualOdometry:
         else:
             self.ba_stats['merged'] += 1
             self.ba_log.append((len(self.poses_est) - 1, float(res.get('dt', np.nan)), int(res.get('n_active', 0))))
+            if self.ba_marg and same_seg:
+                self.ba_prior = res.get('prior')
             self._merge_ba(res, info, same_seg)
         self._purge_invalid_tracks()
         if same_seg and self.initialized:
@@ -951,6 +960,7 @@ class VisualOdometry:
                 item[1] = item[1].copy()
                 item[1][:3, 3] *= s
         self._sync_poses_after_ba([piv] + scaled, rel_cur=rel_cur)
+        self.ba_prior = scale_prior(self.ba_prior, scaled, c0, s)
         if self.vel is not None:
             self.vel = self.vel.copy()
             self.vel[:3, 3] *= s
@@ -1050,6 +1060,7 @@ class VisualOdometry:
         self.init_ref = None
         self.tracks = _Tracks()
         self.window = []
+        self.ba_prior = None
         self._ba_pending = False
         self._ext_scale = None
         self.vel = None

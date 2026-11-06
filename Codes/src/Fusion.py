@@ -657,7 +657,7 @@ class OnlineFusion:
             lines['nós (suavizado)'] = N[:, :2]
         if self.wheel_dr:
             W = np.array([T[:3, 3] for T in self.wheel_dr])
-            lines['só roda'] = W[:, :2]
+            lines['odometria de rodas'] = W[:, :2]
         seg = [np.array([self.est[a][:2, 3], self.est[b][:2, 3], [np.nan, np.nan]])
                for a, b in self.loops_active if a in self.est and b in self.est]
         if seg:

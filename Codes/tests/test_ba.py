@@ -6,6 +6,8 @@ BA.py: bundle adjustment local isolado, numa janela sintética (KFs e landmarks 
 - snapshot_ba_problem: só entram landmarks válidos, com >= 2 observações na janela e >= 1 KF livre.
 - run_bundle_adjustment escreve o resultado no mapa.
 - Sanidade: resultado que muda a baseline > max_step_change é descartado.
+- Marginalização (ba_mode='marg'): janela deslizante sem KFs fixos depois do 1º BA; o prior marginal é PSD, cobre
+  os KFs da janela, mantém o gauge e as poses convergem como no modo de KFs fixos.
 """
 import numpy as np
 from gtsam import Pose3, Rot3
@@ -13,7 +15,7 @@ from gtsam import Pose3, Rot3
 from _comum import metrica, figuras_ativas, nova_figura, salvar_figura, COR, K_URBAN, IMG_W, IMG_H, make_T, cam_yaw_R, rot_err_deg
 from Map import Map
 from KeyFrame import KeyFrame
-from BA import snapshot_ba_problem, solve_ba, run_bundle_adjustment
+from BA import snapshot_ba_problem, solve_ba, run_bundle_adjustment, scale_prior
 
 
 def _window(rng, n_kf=6, n_pts=400, noise_px=0.5, n_outliers=10):
@@ -172,3 +174,51 @@ def test_ba_descarta_resultado_que_muda_baseline():
     assert res is None
     res = solve_ba(snapshot_ba_problem(m, list(range(6))), K_URBAN, verbose=False, max_step_change=10.0)
     assert res is not None
+
+
+def _janela_deslizante(marg, rng_seed=45, n_kf=14, win=5):
+    """BA a cada KF novo (a pose nova chega com erro, como a do tracking); devolve o erro final de cada KF."""
+    rng = np.random.default_rng(rng_seed)
+    m, T_true, _, _ = _window(rng, n_kf=n_kf, n_pts=900, n_outliers=0)
+    _perturb(m, rng, [], pt_sigma=0.1)
+    kfs = {k: KeyFrame(k, float(k), k, m.poses[k]) for k in m.poses}
+    prior, priors = None, []
+    for last in range(win - 1, n_kf):
+        window = list(range(last - win + 1, last + 1))
+        dR = Rot3.Expmap(np.radians(0.3) * rng.normal(0, 1, 3)).matrix()
+        m.poses[last] = m.poses[last - 1] @ (np.linalg.inv(T_true[last - 1]) @ T_true[last]) @ make_T(dR, rng.normal(0, 0.04, 3))
+        res = run_bundle_adjustment(m, kfs, K_URBAN, window, verbose=False, prior=prior, marg=marg)
+        assert res is not None
+        if marg:
+            prior = res['prior']
+            priors.append((window, prior))
+    err = [np.linalg.norm(m.poses[k][:3, 3] - T_true[k][:3, 3]) for k in range(n_kf)]
+    return np.array(err), priors
+
+
+def test_ba_marginalizacao_janela_deslizante():
+    e_fix, _ = _janela_deslizante(marg=False)
+    e_marg, priors = _janela_deslizante(marg=True)
+    for n, (window, p) in enumerate(priors):
+        assert p is not None and p['keys'] == window
+        L = p['R'].T @ p['R']
+        assert np.isfinite(L).all() and np.linalg.eigvalsh(L).min() > -1e-6 * np.abs(L).max()
+        rank = np.linalg.matrix_rank(L, tol=1e-9 * np.abs(L).max())
+        # 1º BA: o prior só carrega os 2 priors de pose fixa (o resto volta no BA seguinte); depois, posto completo
+        assert rank == (12 if n == 0 else 6 * len(window))
+    print(f"erro de translação no fim: fixação máx {100 * e_fix.max():.2f} cm (último {100 * e_fix[-1]:.2f} cm), "
+          f"marginalização máx {100 * e_marg.max():.2f} cm (último {100 * e_marg[-1]:.2f} cm)")
+    metrica("janela_fix_erro_t_max", e_fix.max(), "m")
+    metrica("janela_marg_erro_t_max", e_marg.max(), "m")
+    assert e_marg.max() < 0.05 and e_fix.max() < 0.05
+
+
+def test_scale_prior_acompanha_semelhanca():
+    """Re-escalar as poses e o prior juntos não muda o custo do prior (custo zero no novo ponto de linearização)."""
+    rng = np.random.default_rng(46)
+    R = rng.normal(0, 1, (12, 12))
+    lin = {0: make_T(np.eye(3), [0, 0, 0]), 1: make_T(cam_yaw_R(0.1), [0.2, 0, 1.0])}
+    p = dict(keys=[0, 1], lin=lin, R=R, r=np.zeros(12))
+    q = scale_prior(p, [1], np.zeros(3), 2.0)
+    assert np.allclose(q['lin'][1][:3, 3], [0.4, 0, 2.0]) and np.allclose(q['lin'][0], lin[0])
+    assert np.allclose(q['R'][:, 9:12], R[:, 9:12] / 2.0) and np.allclose(q['R'][:, :9], R[:, :9])

@@ -169,9 +169,9 @@ def gif_trajetoria(d, out, n_frames=180, fps=12, morph_frames=8, min_move=5.0):
     fig.subplots_adjust(bottom=0.2)
     ax.plot(G_all[:, 0], G_all[:, 1], color="0.88", lw=4, zorder=0)
     gt_l, = ax.plot([], [], color=COL["gt"], lw=1.6, label="GT (referência)", zorder=2)
-    rd_l, = ax.plot([], [], color=COL["roda"], lw=1.3, ls=":", label="só roda (dead reckoning)", zorder=1)
+    rd_l, = ax.plot([], [], color=COL["roda"], lw=1.3, ls=":", label="odometria de rodas (dead reckoning)", zorder=1)
     est_l, = ax.plot([], [], color=COL["suav"], lw=2.4, zorder=3,
-                     label="estimativa do grafo (VO + roda + laços)" if snaps else "fusão online")
+                     label="estimativa do grafo (VO + odometria de rodas + laços)" if snaps else "fusão online")
     head, = ax.plot([], [], "o", color=COL["suav"], ms=9, mec="white", mew=1.5, zorder=5)
     lm, = ax.plot([], [], "o", ms=7, mfc="white", mec=LOOP, mew=1.5, ls="none", zorder=1, label="laços aceitos")
     limits(ax, G_all, o[:, 1:3])
@@ -186,13 +186,13 @@ def gif_trajetoria(d, out, n_frames=180, fps=12, morph_frames=8, min_move=5.0):
 
     # painel de erro
     e_on, = ae.plot([], [], color=COL["online"], lw=1.4, label="erro da pose atual (online)")
-    e_tr, = ae.plot([], [], color=COL["suav"], lw=2.2, label="erro médio da trajetória estimada até agora")
-    e_rd, = ae.plot([], [], color=COL["roda"], lw=1.6, label="só roda (odometria de roda)")
+    e_tr, = ae.plot([], [], color=COL["suav"], lw=2.2, label="erro médio acumulado da trajetória estimada")
+    e_rd, = ae.plot([], [], color=COL["roda"], lw=1.6, label="odometria de rodas")
     ymax = 1.5 * max(np.max(o[:, 7]), roda[:, 7].max() if roda is not None else 0.0, 10.0)
     ae.set_yscale("log")                     # roda (centenas de m) e fusão (poucos m) visíveis juntas
-    ae.set(xlim=(t[0], t[-1]), ylim=(1.0, ymax), xlabel="t [s]", ylabel="erro vs GT [m] (escala log)")
+    ae.set(xlim=(t[0], t[-1]), ylim=(1.0, ymax), xlabel="t [s]", ylabel="erro de posição vs GT [m] (escala log)")
     ae.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
-    ae.set_title("Erro ao longo do tempo (marcas na base: laços aceitos)", fontsize=11)
+    ae.set_title("Erro de posição ao longo do tempo (marcas na base: laços aceitos)", fontsize=11)
     ae.grid(True, alpha=0.3)
     ae.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13), ncol=2, fontsize=8.5, frameon=False)
     rug, = ae.plot([], [], "|", color=LOOP, ms=14, mew=1.5, clip_on=False)
@@ -225,12 +225,12 @@ def gif_trajetoria(d, out, n_frames=180, fps=12, morph_frames=8, min_move=5.0):
         rug.set_data(lt_b[:n_new], np.full(n_new, rug_y))
         if snap is not None:
             mv = float(np.linalg.norm(snap["a"] - snap["b"], axis=1).max())
-            flash.set_text(f"LAÇO: lugar de t={snap['ta']:.0f} s reconhecido\ntrajetória ajustada (até {mv:.0f} m)")
+            flash.set_text(f"FECHAMENTO DE LAÇO: local de t={snap['ta']:.0f} s reconhecido\ncorreção máxima da trajetória: {mv:.0f} m")
             flash.set_visible(True)
             state["flash"] = f + 6
         elif n_new > state["shown"] and not snaps:
             q = n_new - 1
-            flash.set_text(f"LAÇO: lugar de t={lt_a[q]:.0f} s reconhecido")
+            flash.set_text(f"FECHAMENTO DE LAÇO: local de t={lt_a[q]:.0f} s reconhecido")
             flash.set_visible(True)
             state["flash"] = f + 8
         state["shown"] = n_new
@@ -396,24 +396,24 @@ def gif_reconhecimento(d, out, n_loops=6, sec_per_loop=3.0):
         fr = frames[k]
         am.cla(); at.cla()
         draw_pair(ai, fr)
-        ai.set_title(f"Imagem ATUAL (t = {fr['tq']:.0f} s)            x            imagem ANTIGA (t = {fr['tc']:.0f} s, "
-                     f"{fr['tq'] - fr['tc']:.0f} s antes)", fontsize=12)
+        ai.set_title(f"Quadro de consulta (t = {fr['tq']:.0f} s)            x            quadro candidato (t = {fr['tc']:.0f} s, "
+                     f"Δt = {fr['tq'] - fr['tc']:.0f} s)", fontsize=12)
         am.plot(o[:, 4], o[:, 5], color="0.75", lw=2)
         g = gt_at(d, [fr["tq"], fr["tc"]])
-        am.plot(*g[0], "o", color=COL["q"], ms=11, mec="white", label="agora")
+        am.plot(*g[0], "o", color=COL["q"], ms=11, mec="white", label="posição atual")
         am.plot(*g[1], "s", color=COL["c"], ms=9, mec="white", label="passagem anterior")
         am.set_aspect("equal")
         am.set_xticks([]); am.set_yticks([])
         am.legend(fontsize=9, loc="best")
-        am.set_title("Onde o carro está (mapa do GT)", fontsize=11)
+        am.set_title("Posição do veículo (trajetória de referência, GT)", fontsize=11)
         at.set_axis_off()
         txt = (f"Laço {k + 1}/{len(frames)}\n\n"
-               f"1. BoW: a imagem atual 'parece' a antiga\n"
-               f"2. {fr['n_match']} casamentos ORB  ->  {fr['n_inl']} consistentes\n"
-               f"    com a geometria (matriz F, linhas verdes)\n"
-               f"3. PnP com pontos 3D -> pose relativa entre as duas\n"
-               f"4. vira um fator no grafo e corrige a deriva\n\n"
-               f"distância medida pelo laço: {fr['meas']:.1f} m (real: {fr['gt']:.1f} m)")
+               f"1. BoW: similaridade de aparência entre os quadros\n"
+               f"2. {fr['n_match']} correspondências ORB  ->  {fr['n_inl']} inliers\n"
+               f"    da geometria epipolar (matriz F, linhas verdes)\n"
+               f"3. PnP com pontos 3D -> pose relativa entre os quadros\n"
+               f"4. restrição inserida como fator no grafo -> correção da deriva\n\n"
+               f"distância medida pelo laço: {fr['meas']:.1f} m (GT: {fr['gt']:.1f} m)")
         at.text(0.02, 0.95, txt, va="top", fontsize=12, family="monospace", transform=at.transAxes)
         return []
     save(FuncAnimation(fig, upd, frames=len(frames)), os.path.join(out, "3_reconhecimento_de_lugar.gif"),
@@ -450,11 +450,11 @@ def gif_otimizacao_global(d, out, fps=12):
         ax.legend(loc="upper left", fontsize=10)
         ax.set_xlabel("x [m]"); ax.set_ylabel("y [m]")
         if w == 0:
-            ttl = f"Fusão ONLINE (causal: só o que já tinha sido visto)  -  ATE {a0:.1f} m"
+            ttl = f"Fusão online (estimativa causal)  -  ATE {a0:.1f} m"
         elif w == 1:
-            ttl = f"Fusão SUAVIZADA (grafo inteiro + todos os laços, no fim)  -  ATE {a1:.1f} m"
+            ttl = f"Fusão suavizada (otimização em lote com todos os laços)  -  ATE {a1:.1f} m"
         else:
-            ttl = "Otimização em lote do grafo inteiro..."
+            ttl = "Otimização em lote do grafo completo..."
         ax.set_title(ttl, fontsize=12)
         return []
     save(FuncAnimation(fig, upd, frames=hold0 + morph + hold1), os.path.join(out, "4_otimizacao_global.gif"), fps)
@@ -502,7 +502,7 @@ def gif_mapa(d, out, n_frames=110, fps=11, max_pts=45000):
         tr.set_data(T[:i, 0], T[:i, 1])
         if i:
             hd.set_data([T[i - 1, 0]], [T[i - 1, 1]])
-        ttl.set_text(f"Mapa 3D do VO no mundo fundido (metros), visto de cima  |  t = {ts[k]:.0f} s  |  {n} pontos")
+        ttl.set_text(f"Mapa 3D do VO no referencial da fusão (vista superior)  |  t = {ts[k]:.0f} s  |  {n} landmarks")
         return []
     save(FuncAnimation(fig, upd, frames=n_frames), os.path.join(out, "5_mapa_fundido.gif"), fps)
 
@@ -522,23 +522,23 @@ def gif_laco_completo(d, out, n_events=3, fps=8):
     fig = plt.figure(figsize=(13, 9))
     gs = fig.add_gridspec(2, 2, height_ratios=[0.8, 1.35], width_ratios=[1.5, 1])
     ai, ag, at = fig.add_subplot(gs[0, :]), fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1])
-    steps = ["1. reconhecimento de lugar (BoW):\n   a imagem atual 'parece' uma antiga",
-             "2. verificação geométrica:\n   pontos casados consistentes (matriz F)\n   + PnP -> pose relativa entre as duas",
-             "3. o laço vira um fator no grafo:\n   o grafo inteiro é reotimizado (iSAM2)",
-             "4. deriva corrigida"]
+    steps = ["1. reconhecimento de local (BoW):\n   similaridade de aparência com quadro anterior",
+             "2. verificação geométrica:\n   inliers da geometria epipolar (matriz F)\n   + PnP -> pose relativa entre os quadros",
+             "3. inserção do fator de laço no grafo:\n   reotimização incremental (iSAM2)",
+             "4. correção da deriva acumulada"]
 
     def upd(f):
         n, s = divmod(f, per)
         e, fr = ev[n], ev[n]["fr"]
         stage = 0 if s < A else 1 if s < A + B else 2 if s < A + B + C else 3
         draw_pair(ai, fr, frac=0.0 if stage == 0 else ease((s - A) / B) if stage == 1 else 1.0)
-        ai.set_title(f"Laço {n + 1}/{len(ev)}   |   imagem ATUAL (t = {e['tb']:.0f} s)        x        imagem ANTIGA "
-                     f"(t = {e['ta']:.0f} s, {e['tb'] - e['ta']:.0f} s antes)", fontsize=12)
+        ai.set_title(f"Laço {n + 1}/{len(ev)}   |   quadro de consulta (t = {e['tb']:.0f} s)        x        quadro candidato "
+                     f"(t = {e['ta']:.0f} s, Δt = {e['tb'] - e['ta']:.0f} s)", fontsize=12)
         w = ease((s - A - B) / C) if stage >= 2 else 0.0
         draw_graph(ag, e, w)
         ag.set_xlabel("x [m]")
         ag.set_ylabel("y [m]")
-        ag.set_title("grafo ANTES do laço" if w == 0 else "grafo DEPOIS do laço" if w == 1 else "otimizando...",
+        ag.set_title("grafo antes do fechamento de laço" if w == 0 else "grafo após o fechamento de laço" if w == 1 else "otimização em andamento...",
                      fontsize=12, color=COL["antes"] if w == 0 else COL["depois"] if w == 1 else "0.2")
         at.cla()
         at.set_axis_off()
@@ -549,7 +549,7 @@ def gif_laco_completo(d, out, n_events=3, fps=8):
                     color="black" if on else "0.65", weight="bold" if on else "normal",
                     bbox=dict(fc="#eef6ff", ec=COL["q"], boxstyle="round,pad=0.4") if on else None)
             y -= 0.2
-        info = f"{fr['n_match']} casamentos ORB -> {fr['n_inl']} consistentes"
+        info = f"{fr['n_match']} correspondências ORB -> {fr['n_inl']} inliers"
         if stage == 3:
             info += f"\nerro médio vs GT: {e['eb']:.1f} m -> {e['ea']:.1f} m"
         at.text(0.0, 0.08, info, va="bottom", fontsize=12, family="monospace", transform=at.transAxes,

@@ -271,7 +271,7 @@ def _traj_loop(q, stop_event, title):
     ax.set_xlabel("x [m]"); ax.set_ylabel("y [m]"); ax.grid(True); ax.set_aspect('equal', adjustable='datalim')
     ax.set_title(title)
     styles = {'GT': dict(color='k', lw=2.5), 'fusão (online)': dict(color='tab:blue', lw=1.5),
-              'nós (suavizado)': dict(color='tab:orange', lw=1.2, ls='--'), 'só roda': dict(color='tab:gray', lw=1),
+              'nós (suavizado)': dict(color='tab:orange', lw=1.2, ls='--'), 'odometria de rodas': dict(color='tab:gray', lw=1),
               'laços': dict(color='tab:green', lw=1.2)}
     lines = {}
     plt.ion()

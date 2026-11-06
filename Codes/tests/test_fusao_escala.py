@@ -69,7 +69,7 @@ def _fig_reinicio(fin, scale, lost):
     fig, ax = nova_figura(w=6.0, h=3.0)
     t = np.asarray(fin['t_nodes'])
     lo, hi = min(lost) * DT, max(lost) * DT
-    ax.axvspan(lo, hi, color=COR['grade'], lw=0, label="VO perdido")
+    ax.axvspan(lo, hi, color=COR['grade'], lw=0, label="perda de rastreamento do VO")
     ax.plot(t, [scale(x) for x in t], color=COR['gt'], lw=1.4, label="verdadeira")
     ax.plot(t, np.exp(fin['log_scales']), color=COR['fusao'], label="estimada (grafo)")
     ax.set_yscale("log")
@@ -78,7 +78,7 @@ def _fig_reinicio(fin, scale, lost):
     ax.minorticks_off()
     ax.set_xlabel("t [s]")
     ax.set_ylabel("escala do VO [m / unid.]")
-    ax.set_title(f"Reinício do VO com escala 10x: re-semeaduras = {fin['n_reseed']}")
+    ax.set_title(f"Reinicialização do VO com escala 10x: reinicializações da escala = {fin['n_reseed']}")
     ax.legend(loc="upper left")
     fig.tight_layout()
     salvar_figura(fig, "fusao_reinicio_vo")
@@ -103,7 +103,7 @@ def test_escala_que_deriva_e_recuperada():
         e_wh = ate(_dead_reckoning(msgs)[:, :3, 3], T[:, :3, 3])
         res.append((nome, scale, fin, err, poses, e_fus, e_wh, tol_med, tol_max))
         print(f"{nome:14s} erro da escala: mediano {100 * np.median(err):5.2f} %, máx {100 * err.max():5.2f} %  |  "
-              f"ATE fusão {e_fus:5.2f} m, só roda {e_wh:5.2f} m")
+              f"ATE fusão {e_fus:5.2f} m, odometria de rodas {e_wh:5.2f} m")
         slug = nome.replace(" ", "_").replace("á", "a")
         metrica(f"{slug}_escala_erro_mediano", np.median(err))
         metrica(f"{slug}_escala_erro_max", err.max())

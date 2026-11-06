@@ -30,7 +30,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-LABELS = {"fusao_suavizada": "fusão suavizada", "fusao_online": "fusão online", "so_roda": "só roda"}
+LABELS = {"fusao_suavizada": "fusão suavizada", "fusao_online": "fusão online", "so_roda": "odometria de rodas"}
 COLORS = {"fusao_suavizada": "#1baf7a", "fusao_online": "#eb6834", "so_roda": "#eda100"}
 
 

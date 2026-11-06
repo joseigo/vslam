@@ -67,11 +67,15 @@ FIG_FORMAT = "pdf"                  # formato das figuras (pdf = vetorial p/ a d
 RESULTS_DIR = base.RESULTS_DIR      # Dissert/resultados/<dataset>/(dados/)
 
 # cores fixas por trajetória (mesma cor em todas as figuras)
-VO_PURE, VO_FB = "VO puro (Sim3)", "VO c/ escala da fusão (Sim3)"
+VO_PURE, VO_FB = "VO monocular (Sim(3))", "VO com escala realimentada (Sim(3))"
+WHEEL = "odometria de rodas"
 COLORS = {"GT": "#0b0b0b", VO_PURE: "#2a78d6", VO_FB: "#2a78d6", "fusão online": "#eb6834",
-          "fusão suavizada": "#1baf7a", "só roda": "#eda100"}
+          "fusão suavizada": "#1baf7a", WHEEL: "#eda100"}
+SENSOR_NAMES = {"vo": "VO", "wheel": "odometria de rodas", "imu": "IMU"}
+LOOP_KIND_NAMES = {"aceito": "aceito", "rejeitado": "rejeitado", "porta": "descartado no teste de deriva",
+                   "outro": "outro"}
 LOOP_COLORS = {True: "#008300", False: "#e34948"}      # laço aceito no final / rejeitado
-STYLES = {VO_PURE: "--", VO_FB: "--", "só roda": ":"}
+STYLES = {VO_PURE: "--", VO_FB: "--", WHEEL: ":"}
 
 
 def find_dataset_files(images_dir):
@@ -184,12 +188,16 @@ def describe(t, T, t_gt, T_gt, origin, with_scale):
                 drift=100 * float(err[-1]) / max(dist[-1], 1e-9), length=float(dist[-1]))
 
 
+def fusion_title(sensors):
+    return "Fusão " + " + ".join(SENSOR_NAMES.get(s, s) for s in sensors)
+
+
 def plot_results(rows, sensors, t0, scale_t, scale_s, vo_lost_t, out, show, loops=()):
     import matplotlib
     if not show:
         matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    title = f"Fusão {'+'.join(sensors)}"
+    title = fusion_title(sensors)
     G = max(rows.values(), key=lambda e: len(e['G']))      # GT mais denso (por frame) p/ desenhar a referência
     figs = []
 
@@ -211,12 +219,12 @@ def plot_results(rows, sensors, t0, scale_t, scale_s, vo_lost_t, out, show, loop
                 ax.plot(ref['P'][[ia, ib], 0], ref['P'][[ia, ib], 1], color=LOOP_COLORS[ok], lw=1.0,
                         ls='-' if ok else '--', marker='.', ms=5,
                         label=(f"laços {'aceitos' if ok else 'rejeitados'} ({len(sel)})" if k == 0 else None))
-    ax.plot(0, 0, 'g^', ms=12, mec='black', label="início (0, 0)")
-    ax.plot(G['G'][-1, 0], G['G'][-1, 1], 's', ms=9, color=COLORS["GT"], mec='white', label="fim (GT)")
+    ax.plot(0, 0, 'g^', ms=12, mec='black', label="pose inicial (0, 0)")
+    ax.plot(G['G'][-1, 0], G['G'][-1, 1], 's', ms=9, color=COLORS["GT"], mec='white', label="pose final (GT)")
     ax.axhline(0, color='0.6', lw=0.8); ax.axvline(0, color='0.6', lw=0.8)
     ax.set_aspect('equal', adjustable='datalim'); ax.grid(True, alpha=0.3); ax.legend(fontsize=9, loc='best')
     ax.set_xlabel("x [m]"); ax.set_ylabel("y [m]")
-    ax.set_title(f"{title}: trajetórias alinhadas no início (todas partem de 0,0)")
+    ax.set_title(f"{title}: trajetórias com origem comum (alinhadas na pose inicial)")
 
     names = list(rows)
     x = np.arange(len(names))
@@ -249,24 +257,24 @@ def plot_results(rows, sensors, t0, scale_t, scale_s, vo_lost_t, out, show, loop
         a1.axvline(L['t_b'] - t0, color=LOOP_COLORS[True], alpha=0.35, lw=1, ls=':',
                    label="laço aceito" if k == 0 else None)
     a1.set(xlabel="t [s]", ylabel="erro de posição [m]", title="Erro de translação ao longo do tempo"
-           + (" (faixas vermelhas: VO perdido)" if len(vo_lost_t) else ""))
-    a2.set(xlabel="distância percorrida (GT) [m]", ylabel="erro de posição [m]", title="Erro vs distância percorrida")
-    a3.set(xlabel="t [s]", ylabel="erro de guinada [°]", title="Erro de orientação (yaw)")
-    a5.set(xlabel="t [s]", ylabel="z [m]", title="Altura relativa ao início")
+           + (" (faixas vermelhas: perda de rastreamento do VO)" if len(vo_lost_t) else ""))
+    a2.set(xlabel="distância percorrida (GT) [m]", ylabel="erro de posição [m]", title="Erro de translação vs distância percorrida")
+    a3.set(xlabel="t [s]", ylabel="erro de guinada [°]", title="Erro de orientação (guinada)")
+    a5.set(xlabel="t [s]", ylabel="z [m]", title="Altitude relativa à pose inicial")
     a6.set(xlabel="erro de posição [m]", ylabel="% das amostras", title="Distribuição acumulada do erro (CDF)")
     if len(scale_t):
-        a4.plot(np.asarray(scale_t) - t0, scale_s, color=COLORS["fusão suavizada"], lw=1.6, label="escala no grafo")
+        a4.plot(np.asarray(scale_t) - t0, scale_s, color=COLORS["fusão suavizada"], lw=1.6, label="escala estimada (grafo de fatores)")
         if VO_PURE in rows:          # com realimentação o VO já está em ~metros: a escala Sim3 dele não é comparável
             a4.axhline(rows[VO_PURE]['scale'], color=COLORS[VO_PURE], ls='--', lw=1.4,
-                       label=f"escala ótima Sim3 do VO = {rows[VO_PURE]['scale']:.3f}")
-        a4.set(xlabel="t [s]", ylabel="m / unid. VO", title="Escala do VO estimada pelo grafo")
+                       label=f"escala ótima do alinhamento Sim(3) do VO = {rows[VO_PURE]['scale']:.3f}")
+        a4.set(xlabel="t [s]", ylabel="m / unid. VO", title="Escala métrica do VO estimada pelo grafo de fatores")
     else:
         a4.set_axis_off()
     for a in (a1, a2, a3, a4, a5, a6):
         if a.axison:
             a.grid(True, alpha=0.3)
             a.legend(fontsize=8)
-    fig.suptitle(f"{title}: análise do erro (alinhamento ancorado em t0, zero comum)")
+    fig.suptitle(f"{title}: análise do erro (alinhamento ancorado em t0)")
     fig.tight_layout()
     figs.append(save_fig(fig, f"{out}_erros"))
 
@@ -279,16 +287,16 @@ def plot_results(rows, sensors, t0, scale_t, scale_s, vo_lost_t, out, show, loop
             sel = [L for L in loops if L['kind'] == key]
             if sel:
                 b1.scatter([L['t_b'] - t0 for L in sel], [L['meas_err'] for L in sel], marker=mk, s=40, color=col,
-                           edgecolor='white', lw=0.6, label=f"{key} ({len(sel)})")
+                           edgecolor='white', lw=0.6, label=f"{LOOP_KIND_NAMES[key]} ({len(sel)})")
                 b2.scatter([L.get('dpos', np.nan) for L in sel], [L['meas_err'] for L in sel], marker=mk, s=40,
-                           color=col, edgecolor='white', lw=0.6, label=f"{key} ({len(sel)})")
+                           color=col, edgecolor='white', lw=0.6, label=f"{LOOP_KIND_NAMES[key]} ({len(sel)})")
         for b in (b1, b2):
-            b.axhline(LOOP_GT_TOL, color='0.4', ls='--', lw=1, label=f"tolerância ({LOOP_GT_TOL:.0f} m)")
+            b.axhline(LOOP_GT_TOL, color='0.4', ls='--', lw=1, label=f"limiar de correção ({LOOP_GT_TOL:.0f} m)")
             b.grid(True, alpha=0.3); b.legend(fontsize=8)
-        b1.set(xlabel="t do KF atual [s]", ylabel="|dist. medida - dist. GT| [m]",
-               title="Erro da medida de cada laço (corretos abaixo da linha)")
-        b2.set(xlabel="desvio laço vs. estimativa no momento da detecção [m]",
-               ylabel="|dist. medida - dist. GT| [m]", title="Deriva acumulada que cada laço corrige")
+        b1.set(xlabel="t do KF de consulta [s]", ylabel="|dist. medida - dist. GT| [m]",
+               title="Erro da medição de cada fechamento de laço (corretos abaixo do limiar)")
+        b2.set(xlabel="discrepância entre a medição do laço e a estimativa no instante da detecção [m]",
+               ylabel="|dist. medida - dist. GT| [m]", title="Deriva acumulada corrigida por cada fechamento de laço")
         fig.tight_layout()
         figs.append(save_fig(fig, f"{out}_lacos"))
     return plt, figs
@@ -398,7 +406,7 @@ def plot_revisits(rv, covered, rec, loops, t0, origin, title, out):
     G_at = lambda t: P[int(np.argmin(np.abs(rv['t'] - t)))]
     marks = [("aceito e correto", lambda L: L['kind'] == 'aceito' and L['correct'] and not L.get('stop'), 'o',
               LOOP_COLORS[True], 7),
-             ("aceito, sem rodar (parada)", lambda L: L['kind'] == 'aceito' and L['correct'] and L.get('stop'), 's',
+             ("aceito, veículo parado", lambda L: L['kind'] == 'aceito' and L['correct'] and L.get('stop'), 's',
               '#8a8984', 7),
              ("aceito e errado", lambda L: L['kind'] == 'aceito' and not L['correct'], 'X', LOOP_COLORS[False], 9),
              ("não aceito", lambda L: L['kind'] != 'aceito', 'x', '0.35', 5)]
@@ -414,7 +422,7 @@ def plot_revisits(rv, covered, rec, loops, t0, origin, title, out):
     ax.plot(P[0, 0], P[0, 1], 'g^', ms=12, mec='black', label="início")
     ax.set_aspect('equal', adjustable='datalim'); ax.grid(True, alpha=0.3); ax.legend(fontsize=9, loc='best')
     ax.set(xlabel="x [m]", ylabel="y [m]",
-           title=f"{title}: onde havia revisita (GT) e onde houve laço (posições reais no GT)")
+           title=f"{title}: trechos de revisita (GT) e fechamentos de laço detectados (posições no GT)")
 
     # faixa no tempo: trecho de revisita (claro) e parte coberta por laço correto (escuro)
     rows = {1: 2, 2: 1}
@@ -426,10 +434,10 @@ def plot_revisits(rv, covered, rec, loops, t0, origin, title, out):
             at.broken_barh([(rv['t'][a] - t0, max(rv['t'][b] - rv['t'][a], 0.5))], (y - 0.35, 0.7),
                            color=REVISIT_COLORS[c], alpha=0.9)
     at.set_yticks([2, 1, 0], [f"{REVISIT_NAMES[c]}\ncoberto {100 * rec[c]:.0f}%" if c in rec else REVISIT_NAMES[c]
-                              for c in (1, 2)] + ["laços (t atual)"], fontsize=9)
+                              for c in (1, 2)] + ["laços (t da consulta)"], fontsize=9)
     at.set_ylim(-0.6, 2.6); at.set_xlim(rv['t'][0] - t0, rv['t'][-1] - t0)
     at.grid(True, axis='x', alpha=0.3); at.set_xlabel("t [s]")
-    at.set_title(f"Cobertura: escuro = laço aceito correto a até {REVISIT['cover']:.0f} m; claro = revisita sem laço",
+    at.set_title(f"Cobertura: escuro = revisita com laço correto a até {REVISIT['cover']:.0f} m; claro = revisita sem laço",
                  fontsize=10)
     fig.tight_layout()
     return save_fig(fig, f"{out}_revisitas")
@@ -530,13 +538,15 @@ def save_figure_data(dados_dir, rows, rpe, rv, covered, loops, t0, origin, scale
     with open(p("metricas.csv"), "w", newline="") as fh:            # tabela-resumo (fig. trajetória + RPE)
         w = csv.writer(fh)
         w.writerow(["metodo", "ate_m", "rmse_ancorado_m", "erro_final_m", "deriva_pct", "yaw_medio_abs_deg",
-                    "escala_sim3", "percurso_m", "rpe_transl_pct", "rpe_rot_deg_100m"])
+                    "escala_sim3", "percurso_m", "rpe_transl_pct", "rpe_rot_deg_100m",
+                    "rpe_transl_mediana_pct", "rpe_rot_mediana_deg_100m"])
         for n, e in rows.items():
             r = rpe.get(n) or {}
-            rt = np.mean(np.concatenate([v['t'] for v in r.values()])) if r else np.nan
-            rr = np.mean(np.concatenate([v['r'] for v in r.values()])) if r else np.nan
+            at = np.concatenate([v['t'] for v in r.values()]) if r else np.full(1, np.nan)
+            ar = np.concatenate([v['r'] for v in r.values()]) if r else np.full(1, np.nan)
             w.writerow([n] + [f"{x:.4f}" for x in (e['ate'], e['ate0'], e['final'], e['drift'],
-                                                   np.mean(np.abs(e['dyaw'])), e['scale'], e['length'], rt, rr)])
+                                                   np.mean(np.abs(e['dyaw'])), e['scale'], e['length'],
+                                                   np.mean(at), np.mean(ar), np.median(at), np.median(ar))])
     for n, e in rows.items():                                         # séries das figuras de trajetória e de erro
         _csv(p(f"traj_{_slug(n)}.csv"),
              ["t", "x", "y", "z", "gt_x", "gt_y", "gt_z", "erro_m", "dist_gt_m", "erro_yaw_deg"],
@@ -544,11 +554,12 @@ def save_figure_data(dados_dir, rows, rpe, rv, covered, loops, t0, origin, scale
     with open(p("rpe.csv"), "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["metodo", "L_m", "n_segmentos", "transl_media_pct", "transl_p25", "transl_p75",
-                    "rot_media_deg_100m", "rot_p25", "rot_p75"])
+                    "rot_media_deg_100m", "rot_p25", "rot_p75", "transl_mediana_pct", "rot_mediana_deg_100m"])
         for n, r in rpe.items():
             for L, v in r.items():
                 w.writerow([n, L, len(v['t'])] + [f"{x:.5f}" for x in (
-                    np.mean(v['t']), *np.percentile(v['t'], [25, 75]), np.mean(v['r']), *np.percentile(v['r'], [25, 75]))])
+                    np.mean(v['t']), *np.percentile(v['t'], [25, 75]), np.mean(v['r']), *np.percentile(v['r'], [25, 75]),
+                    np.median(v['t']), np.median(v['r']))])
     _csv(p("revisitas_gt.csv"), ["t", "dist_m", "x", "y", "tipo", "coberto"],
          [rv['t'] - t0, rv['s'], rv['P'] - origin[:2], rv['cls'], covered.astype(int)],
          fmt=["%.4f", "%.3f", "%.3f", "%.3f", "%d", "%d"])
@@ -566,7 +577,7 @@ def save_figure_data(dados_dir, rows, rpe, rv, covered, loops, t0, origin, scale
 
 # ------------------------------------------------------------------ funil do detector de laço avaliado c/ GT
 LOOP_CAND_TOL = 30.0                # m: candidato "verdadeiro" se distam < isso no GT (a câmera casa KFs até ~20 m à frente)
-FUNNEL = ["consultado", "com candidato BoW", "temporalmente consistente", "passou F (2D-2D)", "pontos 3D ok",
+FUNNEL = ["consulta", "candidato BoW", "consistência temporal", "verificação epipolar (F)", "correspondências 3D",
           "verificado (PnP)", "aceito no grafo"]
 STAGE_IDX = dict(sem_elegivel=0, pouco_informativa=0, sem_candidato=0, inconsistente=1, intervalo_laco=1,
                  falha_f=2, falha_3d=3, falha_pnp=4, verificado=5)
@@ -613,7 +624,7 @@ def loop_funnel(log, loops, t_gt, T_gt, rv, t0, title, out, dados_dir, min_f_inl
                     ("revisita sentido oposto", place == 2, REVISIT_COLORS[2]),
                     ("sem revisita (GT)", place == 0, "#c3c2b7")]
     groups_cand = [(f"revisita verdadeira (< {LOOP_CAND_TOL:.0f} m no GT)", cand_ok, LOOP_COLORS[True]),
-                   (f"mesmo lugar sem rodar (parada, < {REVISIT['min_travel']:.0f} m)", cand_stop, "#8a8984"),
+                   (f"mesmo local, veículo parado (< {REVISIT['min_travel']:.0f} m percorridos)", cand_stop, "#8a8984"),
                    ("candidato falso", cand_bad, LOOP_COLORS[False])]
     print(f"\nFunil do detector de laço x GT (candidato verdadeiro: < {LOOP_CAND_TOL:.0f} m no GT):")
     print(f"{'etapa':28s} {'total':>6s} {'mesmo s.':>8s} {'oposto':>7s} {'s/ rev.':>7s} {'cand. V':>8s} "
@@ -624,8 +635,8 @@ def loop_funnel(log, loops, t_gt, T_gt, rv, t0, title, out, dados_dir, min_f_inl
 
     fig, (a1, a2, a3) = plt.subplots(1, 3, figsize=(19, 6), gridspec_kw=dict(width_ratios=[1.2, 1.2, 1]))
     y = np.arange(len(FUNNEL))[::-1]
-    for ax, groups, ttl in ((a1, groups_place, "Até onde chega cada consulta, por tipo de lugar (GT)"),
-                            (a2, groups_cand, "Candidato escolhido: lugar certo ou não (GT)")):
+    for ax, groups, ttl in ((a1, groups_place, "Etapa máxima atingida por consulta, por tipo de local (GT)"),
+                            (a2, groups_cand, "Validade do candidato selecionado (GT)")):
         left = np.zeros(len(FUNNEL))
         for lab, m, col in groups:
             v = np.array(reach(m), float)
@@ -641,19 +652,19 @@ def loop_funnel(log, loops, t_gt, T_gt, rv, t0, title, out, dados_dir, min_f_inl
     nf = np.array([r['n_f'] for r in log])
     a3.hist([nf[tried & cand_ok], nf[tried & cand_stop], nf[tried & cand_bad]], bins=bins, stacked=True,
             color=[LOOP_COLORS[True], "#8a8984", LOOP_COLORS[False]],
-            label=["revisita verdadeira", "parada (sem rodar)", "candidato falso"])
+            label=["revisita verdadeira", "veículo parado", "candidato falso"])
     a3.axvline(min_f_inliers, color='0.2', ls='--', lw=1.2, label=f"limiar min_f_inliers = {min_f_inliers}")
     a3.set(xlabel="inliers da matriz F", ylabel="nº de consultas verificadas",
-           title="Inliers da F nas consultas consistentes")
+           title="Inliers da matriz F nas consultas temporalmente consistentes")
     a3.grid(True, alpha=0.3); a3.legend(fontsize=8)
-    fig.suptitle(f"{title}: funil do detector de laço avaliado com o GT")
+    fig.suptitle(f"{title}: funil do detector de fechamento de laço avaliado com o GT")
     fig.tight_layout()
     return save_fig(fig, f"{out}_funil_lacos")
 
 
 # ------------------------------------------------------------------ métricas de processamento (tempo real)
 PROC_BLOCK = 200                    # frames por bloco nas curvas (média / p95 de cada bloco)
-PROC_COMPONENTS = [("vo", "VO", "#2a78d6"), ("fusao", "fusão", "#1baf7a"), ("laco", "laço (envio/recepção)", "#eda100"),
+PROC_COMPONENTS = [("vo", "VO", "#2a78d6"), ("fusao", "fusão", "#1baf7a"), ("laco", "laço (comunicação entre processos)", "#eda100"),
                    ("viz", "visualização", "#8a8984"), ("io", "espera de imagem", "#c3c2b7")]
 
 
@@ -756,13 +767,13 @@ def processing_report(timing, ba_log, be_log, loop_log, node_dt, extra, title, o
     a1.stackplot(tb, *[mean_b[k] for k, _, _ in PROC_COMPONENTS], labels=[n for _, n, _ in PROC_COMPONENTS],
                  colors=[c for _, _, c in PROC_COMPONENTS], alpha=0.85)
     a1.plot(tb, p95_b, color='black', lw=1, ls=':', label="total, p95 do bloco")
-    a1.axhline(1000 * period, color='#e34948', ls='--', lw=1.4, label=f"orçamento ({1000 * period:.0f} ms = câmera)")
+    a1.axhline(1000 * period, color='#e34948', ls='--', lw=1.4, label=f"limite de tempo real (período da câmera, {1000 * period:.0f} ms)")
     a1.set(xlabel="t [s]", ylabel="ms/frame", title=f"Processo principal: tempo por frame (média a cada {PROC_BLOCK} frames)")
     for k, name, col in PROC_COMPONENTS:
         a2.plot(kb, mean_b[k], color=col, lw=1.6, label=name)
     a2.plot(kb, sum(mean_b.values()), color='black', lw=1.8, label="total")
     a2.axhline(1000 * period, color='#e34948', ls='--', lw=1.4)
-    a2.set(xlabel="nº de keyframes no mapa", ylabel="ms/frame", title="Crescimento com o tamanho do mapa")
+    a2.set(xlabel="nº de keyframes no mapa", ylabel="ms/frame", title="Custo computacional vs tamanho do mapa")
     fps = np.array([len(i) / total[i].sum() for i in blk])
     a3.plot(tb, fps, color='black', lw=1.6, label="processamento")
     a3.axhline(1 / period, color='#e34948', ls='--', lw=1.4, label=f"câmera ({1 / period:.0f} FPS)")
@@ -783,7 +794,7 @@ def processing_report(timing, ba_log, be_log, loop_log, node_dt, extra, title, o
                 label="consulta + verificação (média)")
         a4.axhline(1000 * kf_period, color='0.3', ls='--', lw=1.2, label=f"intervalo médio entre KFs ({1000 * kf_period:.0f} ms)")
         a4.set_yscale('log')
-    a4.set(xlabel="nº de KFs no banco", ylabel="ms/KF", title="Detector de laço (processo separado)")
+    a4.set(xlabel="nº de KFs no banco", ylabel="ms/KF", title="Detector de fechamento de laço (processo dedicado)")
     if len(B):
         a5.scatter(B[node, 0], bt[node], s=3, color='#1baf7a', alpha=0.4, rasterized=True, label="nó novo")
         a5.scatter(B[~node, 0], bt[~node], s=25, marker='x', color='#e34948', label="laço")
@@ -793,16 +804,16 @@ def processing_report(timing, ba_log, be_log, loop_log, node_dt, extra, title, o
         a5.axhline(1000 * node_dt, color='0.3', ls='--', lw=1.2, label=f"intervalo entre nós ({1000 * node_dt:.0f} ms)")
         a5.set_yscale('log')
     a5b = a5.twinx()
-    a5b.plot(n_nodes, lag, color='#6250d6', lw=1.2, label="atraso (nós enviados e ainda não otimizados)")
+    a5b.plot(n_nodes, lag, color='#6250d6', lw=1.2, label="latência (nós pendentes de otimização)")
     a5b.set_ylabel("atraso [nós]", color='#6250d6')
     a5b.legend(fontsize=8, loc='upper center')
-    a5.set(xlabel="nº de nós no grafo", ylabel="ms", title="Grafo (iSAM2, processo separado)")
+    a5.set(xlabel="nº de nós no grafo", ylabel="ms", title="Grafo de fatores (iSAM2, processo dedicado)")
     if len(A):
         tf = np.interp(A[:, 0], np.arange(len(t)), t)
         a6.scatter(tf, 1000 * A[:, 1], s=4, color='#2a78d6', alpha=0.5, rasterized=True, label="por BA")
         bl = _blocks(tf, 30)
         a6.plot([tf[i].mean() for i in bl], [1000 * A[i, 1].mean() for i in bl], color='black', lw=1.4, label="média")
-    a6.set(xlabel="t [s]", ylabel="ms/BA", title="BA local (worker)")
+    a6.set(xlabel="t [s]", ylabel="ms/BA", title="BA local (processo dedicado)")
     for a in axs.ravel():
         a.grid(True, alpha=0.3)
         if a is not a3 and a.get_legend_handles_labels()[0]:
@@ -826,6 +837,8 @@ def main():
     ap.add_argument("--no-loop", action="store_true", help="desliga o fechamento de laço")
     ap.add_argument("--vocab", default=VOCAB_FILE)
     ap.add_argument("--no-feedback", action="store_true", help="não realimenta a escala do grafo no VO")
+    ap.add_argument("--ba-mode", default="fix", choices=["fix", "marg"],
+                    help="gauge do BA local: fixar os 2 KFs mais antigos (fix) ou marginalizar o KF que sai (marg)")
     ap.add_argument("--vo-view", action="store_true", help="3D no mundo do VO (escala arbitrária), não no fundido")
     ap.add_argument("--init-dist", type=float, default=None,
                     help="m de roda p/ estimar a escala inicial do VO (padrão: 5 no KAIST, 0.5 na Inomi)")
@@ -885,7 +898,8 @@ def main():
     print(f"Câmera: {cam} (fx={K_cam[0, 0]:.1f}, cx={K_cam[0, 2]:.1f}{', com distorção' if dist_cam is not None else ''})")
 
     vo = VisualOdometry(camera_matrix=K_cam, dist_coeffs=dist_cam, orb_params=base.orb_params,
-                        lk_params=base.lk_params, keyframe_params=base.vo_params_for(args.images), sliding_window_size=8,
+                        lk_params=base.lk_params, keyframe_params=dict(base.vo_params_for(args.images), ba_mode=args.ba_mode),
+                        sliding_window_size=8,
                         enable_plot=False, verbose=False, async_ba=base.ASYNC_BA)
     feedback = SCALE_FEEDBACK and not args.no_feedback and ("wheel" in sensors or "imu" in sensors)
     fused_view = FUSED_VIEW and not args.vo_view
@@ -894,7 +908,7 @@ def main():
                           imu_R_vi=IMU_R_VI, backend_process=not args.inline_backend, scale_feedback=feedback,
                           init_wheel_dist=init_dist)
     frame_view = FrameViewer(max_fps=base.WINDOW_MAX_FPS) if gui and SHOW_WINDOW else None
-    traj_view = TrajViewer(f"Fusão {'+'.join(sensors)}") if gui and SHOW_TRAJ else None
+    traj_view = TrajViewer(fusion_title(sensors)) if gui and SHOW_TRAJ else None
     view3d = None
     if gui and SHOW_3D:
         view3d = Open3DViewer(K=K_cam, max_fps=base.VIEW3D_MAX_FPS, points_every=base.VIEW3D_POINTS_EVERY,
@@ -1041,7 +1055,7 @@ def main():
         cand = [(VO_FB if feedback else VO_PURE, t_frames, T_vo, True), ("fusão online", ft, F, False),
                 ("fusão suavizada", nt, res['poses'], False)]
         if fusion.wheel_dr:
-            cand.append(("só roda", ft, np.array(fusion.wheel_dr), False))
+            cand.append((WHEEL, ft, np.array(fusion.wheel_dr), False))
         rows = {}
         for name, t, T, sc in cand:
             m = t >= t0 - 1e-6
@@ -1054,7 +1068,7 @@ def main():
         mg = (t_gt >= t0 - 0.05) & (t_gt <= t_end + 0.05)
         avaliar_evo.write_tum(os.path.join(evo_dir, "gt.txt"), t_gt[mg], T_gt[mg])
         evo_names = {VO_PURE: "vo", VO_FB: "vo", "fusão online": "fusao_online", "fusão suavizada": "fusao_suavizada",
-                     "só roda": "so_roda"}
+                     WHEEL: "so_roda"}
         for name, t, T, sc in cand:
             m = t >= t0 - 1e-6
             if m.sum() >= 3:
@@ -1079,7 +1093,7 @@ def main():
         vo_lost_t = t_frames[(~ok) & (t_frames >= t0)]
         _, figs = plot_results(rows, sensors, t0, nt, np.exp(res['log_scales']), vo_lost_t,
                                args.out, gui, loops)
-        title = f"Fusão {'+'.join(sensors)}"
+        title = fusion_title(sensors)
         fig_rpe, rpe = plot_rpe(rows, title, args.out)
         figs.append(fig_rpe)
         mg = (t_gt >= t0) & (t_gt <= fusion.fused_t[-1])       # só o trecho processado: laço só liga KFs dele
@@ -1101,7 +1115,7 @@ def main():
     fig, ax = plt.subplots(1, 1, figsize=(10, 8))
     draw_snapshot(ax, plot_snapshot(vo, with_points=True),
                   unit="~m" if feedback else "unid.",
-                  title="Odometria Visual Monocular" + (" (escala realimentada pela fusão)" if feedback else
+                  title="Odometria Visual Monocular" + (" (escala métrica realimentada pela fusão)" if feedback else
                                                        " (escala arbitrária)"))
     save_fig(fig, f"{args.out}_vo_trajetoria_xz")
     # o mesmo mapa no mundo fundido (Sim3 de cada nó, após a otimização final) + GT
@@ -1109,7 +1123,7 @@ def main():
         ws = fusion.world_snapshot(vo, with_points=True)
         if ws is not None:
             fig, ax = plt.subplots(1, 1, figsize=(10, 8))
-            draw_snapshot(ax, ws, axes=(0, 1), unit="m", title="Mapa do VO no mundo fundido (após a otimização final)")
+            draw_snapshot(ax, ws, axes=(0, 1), unit="m", title="Mapa do VO no referencial da fusão (após a otimização final)")
             if gt_view is not None:
                 g = gt_view.line(fusion.fused_t, fusion.fused)
                 if g is not None:

@@ -122,7 +122,7 @@ def _fig_pcm(nodes, n_act, n_false, is_true):
     for x, ok in zip(nodes, is_true):
         ax.plot(x, -0.6, marker="|" if ok else "x", ms=8, color=COR['aceito'] if ok else COR['rejeitado'], mew=1.5)
     ax.set_ylim(-1.2, max(n_act) + 1)
-    ax.set_xlabel("nó do grafo em que o laço chega")
+    ax.set_xlabel("nó do grafo na chegada do laço")
     ax.set_ylabel("nº de laços")
     ax.set_title("PCM online: laços ativos no ISAM2 ao longo da execução")
     ax.plot([], [], "|", color=COR['aceito'], ms=8, mew=1.5, label="chegada de laço verdadeiro")
