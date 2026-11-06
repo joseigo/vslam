@@ -803,11 +803,25 @@ def processing_report(timing, ba_log, be_log, loop_log, node_dt, extra, title, o
                 label="média (nós)")
         a5.axhline(1000 * node_dt, color='0.3', ls='--', lw=1.2, label=f"intervalo entre nós ({1000 * node_dt:.0f} ms)")
         a5.set_yscale('log')
-    a5b = a5.twinx()
-    a5b.plot(n_nodes, lag, color='#6250d6', lw=1.2, label="latência (nós pendentes de otimização)")
-    a5b.set_ylabel("atraso [nós]", color='#6250d6')
-    a5b.legend(fontsize=8, loc='upper center')
-    a5.set(xlabel="nº de nós no grafo", ylabel="ms", title="Grafo de fatores (iSAM2, processo dedicado)")
+    # atraso (nós enviados e ainda não otimizados) numa faixa própria abaixo, com o mesmo eixo x: por frame ele
+    # oscila 0/1 e, desenhado cru num 2º eixo y, vira uma mancha que cobre o painel. Resumo por bloco de 50 nós.
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    a5c = make_axes_locatable(a5).append_axes("bottom", size="40%", pad=0.12, sharex=a5)
+    nb = (n_nodes // 50).astype(int)
+    ub = np.unique(nb)
+    xb = np.array([n_nodes[nb == b].mean() for b in ub])
+    lmax = np.array([lag[nb == b].max() for b in ub])
+    lmean = np.array([lag[nb == b].mean() for b in ub])
+    a5c.fill_between(xb, 0, lmax, step='mid', color='#6250d6', alpha=0.18, lw=0,
+                     label=f"máximo por bloco de 50 nós (geral: {lag.max():.0f} nós = {lag.max() * node_dt:.0f} s)")
+    a5c.plot(xb, lmean, color='#6250d6', lw=1.4, drawstyle='steps-mid',
+             label=f"média por bloco (≤ 1 nó em {100 * np.mean(lag <= 1):.0f}% dos frames)")
+    a5c.set_ylim(0, 1.6 * max(lag.max(), 1))                         # folga em cima p/ a legenda
+    a5c.set(xlabel="nº de nós no grafo", ylabel="atraso [nós]\n(enviados, não otimizados)")
+    a5c.grid(True, alpha=0.3)
+    a5c.legend(fontsize=7.5, loc='upper left', ncol=2, frameon=False)
+    a5.tick_params(labelbottom=False)
+    a5.set(ylabel="ms/nó", title="Grafo de fatores (iSAM2, processo dedicado)")
     if len(A):
         tf = np.interp(A[:, 0], np.arange(len(t)), t)
         a6.scatter(tf, 1000 * A[:, 1], s=4, color='#2a78d6', alpha=0.5, rasterized=True, label="por BA")
@@ -821,6 +835,24 @@ def processing_report(timing, ba_log, be_log, loop_log, node_dt, extra, title, o
     fig.suptitle(f"{title}: processamento ({len(t)} frames, {duration:.0f} s de dados)")
     fig.tight_layout()
     return save_fig(fig, f"{out}_processamento")
+
+
+def _overrides(items):
+    """['chave=valor', ...] -> dict, com o valor interpretado (False, 1e9, inf, 'texto')."""
+    import ast
+    out = {}
+    for it in items:
+        k, v = it.split("=", 1)
+        try:
+            out[k.strip()] = ast.literal_eval(v)
+        except (ValueError, SyntaxError):
+            try:
+                out[k.strip()] = float(v)
+            except ValueError:
+                out[k.strip()] = v
+    if out:
+        print(f"Parâmetros sobrescritos: {out}")
+    return out
 
 
 def main():
@@ -837,6 +869,10 @@ def main():
     ap.add_argument("--no-loop", action="store_true", help="desliga o fechamento de laço")
     ap.add_argument("--vocab", default=VOCAB_FILE)
     ap.add_argument("--no-feedback", action="store_true", help="não realimenta a escala do grafo no VO")
+    ap.add_argument("--gpo", action="append", default=[], metavar="CHAVE=VALOR",
+                    help="sobrescreve um campo do GPOConfig (repetível), ex.: --gpo loop_gnc=False")
+    ap.add_argument("--vo", action="append", default=[], metavar="CHAVE=VALOR",
+                    help="sobrescreve um keyframe_param do VO (repetível), ex.: --vo use_ground_scale=False")
     ap.add_argument("--ba-mode", default="fix", choices=["fix", "marg"],
                     help="gauge do BA local: fixar os 2 KFs mais antigos (fix) ou marginalizar o KF que sai (marg)")
     ap.add_argument("--vo-view", action="store_true", help="3D no mundo do VO (escala arbitrária), não no fundido")
@@ -898,13 +934,14 @@ def main():
     print(f"Câmera: {cam} (fx={K_cam[0, 0]:.1f}, cx={K_cam[0, 2]:.1f}{', com distorção' if dist_cam is not None else ''})")
 
     vo = VisualOdometry(camera_matrix=K_cam, dist_coeffs=dist_cam, orb_params=base.orb_params,
-                        lk_params=base.lk_params, keyframe_params=dict(base.vo_params_for(args.images), ba_mode=args.ba_mode),
+                        lk_params=base.lk_params, keyframe_params=dict(base.vo_params_for(args.images), ba_mode=args.ba_mode,
+                                                                       **_overrides(args.vo)),
                         sliding_window_size=8,
                         enable_plot=False, verbose=False, async_ba=base.ASYNC_BA)
     feedback = SCALE_FEEDBACK and not args.no_feedback and ("wheel" in sensors or "imu" in sensors)
     fused_view = FUSED_VIEW and not args.vo_view
     init_dist = args.init_dist if args.init_dist is not None else (0.5 if cam == "inomi" else 5.0)
-    fusion = OnlineFusion(sensors, wheel=wheel, imu=imu, node_dt=args.node_dt, cfg=GPOConfig(),
+    fusion = OnlineFusion(sensors, wheel=wheel, imu=imu, node_dt=args.node_dt, cfg=GPOConfig(**_overrides(args.gpo)),
                           imu_R_vi=IMU_R_VI, backend_process=not args.inline_backend, scale_feedback=feedback,
                           init_wheel_dist=init_dist)
     frame_view = FrameViewer(max_fps=base.WINDOW_MAX_FPS) if gui and SHOW_WINDOW else None
