@@ -42,7 +42,8 @@ def load(res_dir):
     p = lambda n: os.path.join(D, n)
     rd = lambda n: np.loadtxt(p(n), delimiter=",", skiprows=1, ndmin=2) if os.path.isfile(p(n)) else None
     d = dict(dir=res_dir, D=D, online=rd("traj_fusao_online.csv"), suav=rd("traj_fusao_suavizada.csv"),
-             roda=rd("traj_so_roda.csv"))
+             roda=rd("traj_odometria_de_rodas.csv") if os.path.isfile(p("traj_odometria_de_rodas.csv"))
+             else rd("traj_so_roda.csv"))                      # nome antigo (resultados anteriores a 2026-11-04)
     vo = glob.glob(p("traj_vo*.csv"))
     d["vo"] = np.loadtxt(vo[0], delimiter=",", skiprows=1, ndmin=2) if vo else None
     d["loops"] = list(csv.DictReader(open(p("lacos.csv")))) if os.path.isfile(p("lacos.csv")) else []

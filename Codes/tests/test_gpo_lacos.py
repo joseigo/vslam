@@ -202,7 +202,8 @@ def test_pcm_online_clique_dominado_por_verdadeiros():
 
 
 def test_gnc_sozinho_rejeita_falsos():
-    """GNC-TLS no lote final parte de TODOS os candidatos (inclusive os fora do clique): sozinho já rejeita."""
+    """GNC-TLS no lote final considera os candidatos com >= 1 parceiro no PCM (inclusive os fora do clique máximo) e
+    rejeita os falsos que entraram no conjunto."""
     T, msgs, loops = _scenario(seed=22, gross=False)
     fin, truth = _run(T, msgs, loops)
     t_ok, f_ok, _ = _tabela(fin['loops'], truth)
@@ -213,3 +214,57 @@ def test_gnc_sozinho_rejeita_falsos():
     metrica("gnc_peso_max_falsos", w_false.max())
     assert np.all(w_false < 0.5)
     assert np.mean(w_true > 0.5) >= 0.9
+
+
+def test_gnc_parte_da_odometria_independe_da_estimativa_online():
+    """loop_gnc_init='odometria': o GNC parte da solução só com a odometria, montada pela cadeia de odometria a
+    partir do nó 0 -- não herda a estimativa online, que laços falsos aceitos online podem ter entortado (no KAIST,
+    sem a porta de deriva, o GNC partindo da estimativa online ficava preso: ATE 200-600 m com 0 falsos aceitos)."""
+    import gtsam
+    from gtsam import Pose3, Rot3
+    from gtsam.symbol_shorthand import X
+    from GPO import GPOConfig
+    T, msgs, _ = _scenario(seed=50, gross=False)
+    be = FusionBackend(["vo", "wheel"], GPOConfig())
+    for m in msgs:
+        be.add(m)
+    g = be.gpo
+    g.update()
+    clean = g._odometry_solution(g.estimate, 50)
+    bad = gtsam.Values(g.estimate)
+    rng = np.random.default_rng(0)
+    for j in range(len(g.t)):                       # estimativa "online" corrompida: +-30 m, +-0,5 rad por nó
+        bad.update(X(j), g.estimate.atPose3(X(j)).compose(Pose3(Rot3.Yaw(rng.normal(0, 0.5)), rng.normal(0, 30, 3))))
+    corr = g._odometry_solution(bad, 50)
+    d = max(np.linalg.norm(clean.atPose3(X(j)).translation() - corr.atPose3(X(j)).translation())
+            for j in range(len(g.t)))
+    e = ate(np.array([clean.atPose3(X(j)).translation() for j in range(len(g.t))]), T[:, :3, 3])
+    print(f"diferença máx. (partida limpa x corrompida): {d:.2e} m | ATE da solução só odometria: {e:.2f} m")
+    metrica("gnc_odometria_dif_max", d, "m")
+    assert d < 1e-3
+
+
+def test_gnc_ignora_laco_isolado():
+    """loop_gnc_pcm=True: um laço sem nenhum parceiro consistente no PCM não entra no GNC. Num grafo de poses um laço
+    isolado não é verificável (o resíduo cabe na folga da odometria) e o GNC o aceitaria -- no KAIST (urban33, sem
+    laços verdadeiros) um único laço falso assim levava o ATE de 42 m a 350-460 m."""
+    from GPO import GPOConfig
+    T, msgs, _ = _scenario(seed=50, gross=False)
+    lap = int(round(2 * np.pi / (SPEED / RADIUS * DT)))
+    b = len(T) - 20
+    a = b - lap + 40                                 # 40 nós (20 s) depois do lugar certo: ~84 m errado
+    res = {}
+    for pcm in (False, True):
+        be = FusionBackend(["vo", "wheel"], GPOConfig(loop_gnc_pcm=pcm))
+        for m in msgs:
+            be.add(m)
+            if m['frame'] == b:
+                be.add(dict(type='loop', frame_a=a, frame_b=b, rel=relative(T[a], T[b]) @ make_T(t=[3.0, 0, 0]),
+                            t_a=a * DT, t_b=b * DT, n_pnp=50, n_f=100))
+        res[pcm] = be.finalize(batch=True)['loops'][0]
+    gd = float(np.linalg.norm(T[a, :3, 3] - T[b, :3, 3]))
+    print(f"laço falso isolado ({gd:.0f} m errado): GNC sobre todos -> {res[False]['status']}; "
+          f"só c/ parceiro PCM -> {res[True]['status']}")
+    metrica("isolado_aceito_gnc_todos", float(res[False]['w']))
+    metrica("isolado_aceito_gnc_pcm", float(res[True]['w']))
+    assert res[True]['w'] < 0.5

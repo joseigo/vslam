@@ -124,6 +124,7 @@ class VisualOdometry:
         self.min_tri_angle = float(kp.get('min_tri_angle_deg', 1.5))
         self.reproj_thr = float(kp.get('reproj_thr', 2.0))
         self.fb_thr = float(kp.get('fb_thr', 1.0))                     # erro forward-backward (px)
+        self.fb_use_init = bool(kp.get('fb_use_init', True))           # volta do KLT com chute p0 (ver _klt_core)
         self.max_track_age = int(kp.get('max_track_age', 6))           # KFs p/ desistir de triangular
         self.max_lost = int(kp.get('max_lost', 5))
         self.init_scale = float(kp.get('init_scale', 1.0))
@@ -316,12 +317,18 @@ class VisualOdometry:
 
     def _klt_core(self, prev_gray, gray, p0, init=None):
         """KLT + checagem forward-backward. `init` (opcional) = posições previstas (fluxo inicial)."""
-        if init is not None:
+        if init is not None and self.fb_use_init:
             p1, st, _ = cv2.calcOpticalFlowPyrLK(prev_gray, gray, p0, init.copy(),
                                                  flags=cv2.OPTFLOW_USE_INITIAL_FLOW, **self.lk_params)
+            # a volta também precisa de chute (p0), senão não acha deslocamentos grandes e a checagem descarta
+            # tracks bons (curvas: 39% perdidos a 70 px, 94% a 150 px). Igual ao VINS-Fusion (reverse_pts = prev_pts).
+            pb, stb, _ = cv2.calcOpticalFlowPyrLK(gray, prev_gray, p1, p0.copy(),
+                                                  flags=cv2.OPTFLOW_USE_INITIAL_FLOW, **self.lk_params)
         else:
-            p1, st, _ = cv2.calcOpticalFlowPyrLK(prev_gray, gray, p0, None, **self.lk_params)
-        pb, stb, _ = cv2.calcOpticalFlowPyrLK(gray, prev_gray, p1, None, **self.lk_params)
+            p1, st, _ = cv2.calcOpticalFlowPyrLK(prev_gray, gray, p0, None if init is None else init.copy(),
+                                                 flags=0 if init is None else cv2.OPTFLOW_USE_INITIAL_FLOW,
+                                                 **self.lk_params)
+            pb, stb, _ = cv2.calcOpticalFlowPyrLK(gray, prev_gray, p1, None, **self.lk_params)
         fb = np.linalg.norm(p0 - pb, axis=2).ravel()
         p1 = p1.reshape(-1, 2)
         h, w = gray.shape[:2]

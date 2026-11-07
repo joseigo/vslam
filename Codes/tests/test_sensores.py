@@ -190,3 +190,23 @@ def test_image_stamp_ns():
     import datetime
     utc = calendar.timegm(datetime.datetime(2024, 1, 1, 15, 0, 0).timetuple())
     assert image_stamp_ns("20240101_120000_500000.jpg") == utc * 10 ** 9 + 500_000_000
+
+
+def test_acha_encoder_em_sensor_data():
+    """KAIST: as sequências mais novas trazem o encoder em sensor_data/ (as antigas em data_sensor/); o pipeline acha
+    os dois (antes, urban31/37 rodavam sem roda, em silêncio)."""
+    import os
+    import tempfile
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+    from test_vo_fusion_rt import find_dataset_files
+    for sub in ("sensor_data", "data_sensor"):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, sub))
+            os.makedirs(os.path.join(d, "stereo_left"))
+            open(os.path.join(d, sub, "encoder.csv"), "w").write("0,0,0\n")
+            open(os.path.join(d, "global_pose.csv"), "w").write("0" + ",0" * 12 + "\n")
+            _, f = find_dataset_files(os.path.join(d, "stereo_left"))
+            print(f"{sub}: encoder={os.path.relpath(f['encoder'], d) if f['encoder'] else None}")
+            assert f["encoder"] == os.path.join(d, sub, "encoder.csv")
+            assert f["gt"] == os.path.join(d, "global_pose.csv")

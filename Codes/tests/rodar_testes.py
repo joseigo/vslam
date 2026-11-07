@@ -6,10 +6,10 @@ Uso:
     python3 rodar_testes.py gpo laco              # só os arquivos/testes cujo nome contém algum dos filtros
     python3 rodar_testes.py -v                    # imprime a saída de cada teste (tabelas de validação)
     python3 rodar_testes.py --rotulo "fix KLT"    # rótulo da execução no histórico (p/ comparar antes/depois)
-    python3 rodar_testes.py --sem-salvar          # não grava nada em resultados/testes/
+    python3 rodar_testes.py --sem-salvar          # não grava nada em resultados/testes_unitarios/
     python3 rodar_testes.py --sem-figuras         # grava o CSV, mas não gera as figuras (mais rápido)
 
-Resultados (Dissert/resultados/testes/):
+Resultados (Dissert/resultados/testes_unitarios/):
     historico.csv              uma linha por (execução, teste, métrica); acumula todas as execuções
     <execucao>/saida.txt       saída completa da execução (inclusive tracebacks)
     <execucao>/figuras/        figuras dos dados dos testes (.pdf p/ a dissertação + .png)
@@ -33,7 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _comum                                                     # noqa: E402
 
-RESULTS_DIR = os.path.join(os.path.dirname(_comum.CODES_DIR), "resultados", "testes")
+RESULTS_DIR = os.path.join(os.path.dirname(_comum.CODES_DIR), "resultados", "testes_unitarios")
 CSV_PATH = os.path.join(RESULTS_DIR, "historico.csv")
 CSV_COLS = ["execucao", "data_hora", "commit", "rotulo", "teste", "status", "tempo_s", "metrica", "valor",
             "unidade", "mensagem"]
@@ -56,7 +56,7 @@ def main():
     ap.add_argument("filtros", nargs="*", help="só testes cujo 'arquivo::nome' contém algum destes textos")
     ap.add_argument("-v", "--verbose", action="store_true", help="imprime a saída de cada teste")
     ap.add_argument("--rotulo", default="", help="rótulo da execução no histórico")
-    ap.add_argument("--sem-salvar", action="store_true", help="não grava em resultados/testes/")
+    ap.add_argument("--sem-salvar", action="store_true", help="não grava em resultados/testes_unitarios/")
     ap.add_argument("--sem-figuras", action="store_true", help="não gera as figuras dos testes")
     args = ap.parse_args()
 

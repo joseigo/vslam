@@ -16,8 +16,8 @@ Verdade (GT): consulta tem revisita se há KF elegível a < --radius m; o sentid
 (< 30°: mesmo sentido, > 150°: oposto). Candidato correto: a < --radius m da consulta no GT.
 
 Uso:
-    python3 avaliar_lacos.py --images /.../urban39/stereo_left            -> resultados/lacos/urban39/
-    python3 avaliar_lacos.py --resumo resultados/lacos                     -> tabela e figura com todas
+    python3 avaliar_lacos.py --images /.../urban39/stereo_left            -> resultados/sintese/detector_lacos/urban39/
+    python3 avaliar_lacos.py --resumo resultados/sintese/detector_lacos                   -> tabela e figura com todas
 """
 import argparse
 import csv
@@ -39,7 +39,7 @@ from LoopClosure import LoopDetector, LoopConfig, OrbVocabulary  # noqa: E402
 from GPO import image_stamp_ns  # noqa: E402
 
 VOCAB = os.path.join(CODES, "vocabularios", "orb_vocab_k10L5_indep.npz")   # treinado em urban25/33/34
-RESULTS = os.path.join(os.path.dirname(CODES), "resultados", "lacos")
+RESULTS = os.path.join(os.path.dirname(CODES), "resultados", "sintese", "detector_lacos")
 SAME_DEG, OPP_DEG = 30.0, 150.0
 LABELS = {0: "sem revisita", 1: "mesmo sentido", 2: "sentido oposto", 3: "transversal"}
 COL = dict(same="#2a78d6", opp="#eb6834", none="#c3c2b7", ok="#1baf7a", bad="#e34948", miss="#eda100",
@@ -505,7 +505,7 @@ def resumo(pasta):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--images", help="pasta das imagens (stereo_left) de uma sequência do KAIST")
-    ap.add_argument("--out", default=None, help="padrão: resultados/lacos/<dataset>")
+    ap.add_argument("--out", default=None, help="padrão: resultados/sintese/detector_lacos/<dataset>")
     ap.add_argument("--kf-dist", type=float, default=2.0, help="m rodados entre KFs (VO: ~2 m/KF no KAIST)")
     ap.add_argument("--radius", type=float, default=10.0, help="m: mesmo lugar no GT")
     ap.add_argument("--vocab", default=VOCAB)

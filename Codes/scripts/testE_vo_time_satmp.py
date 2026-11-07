@@ -8,7 +8,7 @@ import sys
 CODES_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(CODES_DIR, "src"))
 VOCAB_DIR = os.path.join(CODES_DIR, "vocabularios")
-RESULTS_DIR = os.path.join(os.path.dirname(CODES_DIR), "resultados")   # resultados/<dataset>/...
+RESULTS_DIR = os.path.join(os.path.dirname(CODES_DIR), "resultados", "avulsos")   # execuções avulsas: resultados/avulsos/<dataset>/ (a bateria usa --out)
 import cv2
 import numpy as np
 import glob
@@ -140,13 +140,13 @@ keyframe_params = {
 
 # dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban25/image/stereo_left"
 # dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban26/stereo_left"
-# dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban27/stereo_left"
-dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban30/stereo_left"
+dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban27/stereo_left"
+# dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban30/stereo_left"
 # dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban32/urban32/urban32/image/stereo_left"
 # dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban33/stereo_left"
 # dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban34/stereo_left"
 # dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban38/stereo_left/stereo_left"
-dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban39/stereo_left"
+# dataset_path = "/home/joseigo/Documentos/TCC/Datasets/urban39/stereo_left"
 
 # dataset_path = "/home/joseigo/Documentos/TCC/dataset_inomi/dataset_08_08_16_0"
 # dataset_path = "/home/joseigo/Documentos/TCC/dataset_inomi/dataset_16_0_0_16"

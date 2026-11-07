@@ -89,6 +89,11 @@ class GPOConfig:
     loop_gnc: bool = True                 # GNC-TLS no lote final (False = LM só com os laços ativos do PCM)
     loop_gnc_chi2: float = 16.81          # limiar TLS: chi2(6 g.l.) a 99%
     loop_gnc_mu_step: float = 1.4
+    # ponto de partida do GNC: "online" = estimativa do ISAM2 (pode estar entortada por laços falsos que o PCM deixou
+    # entrar); "odometria" = solução só com a odometria (sem laços), como no GNC original (Yang et al. 2020)
+    loop_gnc_init: str = "odometria"
+    loop_gnc_pcm: bool = True             # GNC só sobre laços com >= 1 parceiro consistente no PCM (laço isolado não
+                                          # é verificável num grafo de poses)
     # nó inicial
     prior_rp_sigma: float = 0.05          # roll/pitch iniciais desconhecidos (IMU estima a gravidade)
     prior_sigma: float = 1e-3
@@ -198,6 +203,7 @@ class GraphPoseOptimizer:
         self.loops: List[dict] = []                    # candidatos a laço (passaram na porta); fora de all_factors
         self.loop_isam_idx: Dict[int, int] = {}        # candidato ativo -> índice do fator no ISAM2
         self.pcm_adj: Dict[int, set] = {}              # grafo de consistência par a par (PCM)
+        self.odo_rel: Dict[int, tuple] = {}            # j -> (i, Pose3 métrica): cadeia de odometria (início do GNC)
 
         if use_imu:
             ip = gtsam.PreintegrationParams.MakeSharedU(p.gravity)
@@ -351,6 +357,7 @@ class GraphPoseOptimizer:
             gtsam.noiseModel.Diagonal.Sigmas(np.array([c.vo_rot_sigma] * 3 + [st] * 3)))
         z_rot, z_t = rel_v.rotation(), np.asarray(rel_v.translation(), float)
         sn = i if scale_node is None else scale_node
+        self.odo_rel.setdefault(j, (i, rel_v, sn))                   # usado só se não houver roda nesta aresta
         f = gtsam.CustomFactor(noise, [X(i), X(j), S(sn)],
                                lambda this, v, H: _vo_factor_error(z_rot, z_t, this, v, H))
         self.n_factors['vo'] += 1
@@ -368,6 +375,7 @@ class GraphPoseOptimizer:
                         c.wheel_x_frac * d, c.wheel_y_frac * d, c.wheel_z_frac * d]) + c.wheel_min
         self._add(gtsam.BetweenFactorPose3(X(i), X(j), rel, gtsam.noiseModel.Diagonal.Sigmas(sig)))
         self.n_factors['wheel'] += 1
+        self.odo_rel[j] = (i, rel)
 
     def add_imu(self, i: int, j: int, pim):
         self._add(gtsam.ImuFactor(X(i), V(i), X(j), V(j), B(i), pim))
@@ -485,14 +493,20 @@ class GraphPoseOptimizer:
             return np.array([2.0 * self._loop_factor(L).error(vals) for L in self.loops])
 
         w = np.ones(len(self.loops))                   # GNC parte de todos os candidatos (inclusive fora do clique)
+        if c.loop_gnc_pcm:                             # ... ou só dos que têm parceiro consistente no PCM
+            w = np.array([1.0 if self.pcm_adj.get(k) else 0.0 for k in range(len(self.loops))])
+        if c.loop_gnc_init == "odometria":
+            values = self._odometry_solution(values, max_iters)
+        cand = w > 0
         vals = solve(w, values, max_iters)
         res = r2(vals)
-        if res.max() > cb2:
-            mu = cb2 / max(2 * res.max() - cb2, 1e-9)
+        if res[cand].max(initial=0.0) > cb2:
+            mu = cb2 / max(2 * res[cand].max() - cb2, 1e-9)
             for _ in range(max_outer):
                 lo, hi = mu / (mu + 1) * cb2, (mu + 1) / mu * cb2
                 w_new = np.where(res >= hi, 0.0, np.where(res <= lo, 1.0,
                                                           np.sqrt(cb2 * mu * (mu + 1) / np.maximum(res, 1e-12)) - mu))
+                w_new = np.where(cand, w_new, 0.0)
                 vals = solve(w_new, vals, inner_iters)
                 res = r2(vals)
                 done = np.abs(w_new - w).max() < 1e-3 and np.all((w_new < 1e-3) | (w_new > 1 - 1e-3))
@@ -501,12 +515,33 @@ class GraphPoseOptimizer:
                     break
                 mu *= c.loop_gnc_mu_step
             w = np.round(w)
-            vals = solve(w, vals, max_iters)
+            # solução final com os pesos decididos: partindo da odometria (limpa) ou do estado do GNC (padrão antigo)
+            vals = solve(w, values if c.loop_gnc_init == "odometria" else vals, max_iters)
         for L, wi, ri in zip(self.loops, w, r2(vals)):
             L['info']['w'] = float(wi)
             L['info']['r2'] = float(ri)
             L['info']['status'] = 'aceito (GNC)' if wi >= 0.5 else 'rejeitado (GNC)'
         return vals
+
+    def _odometry_solution(self, values, max_iters):
+        """Solução só com a odometria (todos os fatores, nenhum laço), partindo da cadeia de odometria (roda; ou VO x
+        escala) composta a partir do nó 0 -- não herda as distorções da estimativa online."""
+        v = gtsam.Values(values)
+        P = [self.pose(0)]
+        for j in range(1, len(self.t)):
+            e = self.odo_rel.get(j)
+            if e is None:
+                P.append(P[-1])
+                continue
+            Pi = P[e[0]]
+            if len(e) == 2:
+                P.append(Pi.compose(e[1]))
+            else:
+                s = float(np.exp(values.atVector(S(e[2]))[0]))
+                P.append(Pi.compose(Pose3(e[1].rotation(), s * np.asarray(e[1].translation()))))
+        for j, Pj in enumerate(P):
+            v.update(X(j), Pj)
+        return levenberg_marquardt(gtsam.NonlinearFactorGraph(self.all_factors), v, max_iters)
 
     # ---------------------------------------------------------------- solver
     def update(self, extra_iters: int = 0):

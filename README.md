@@ -28,30 +28,34 @@ Todo o processamento roda mais rápido que o tempo real.
   (pré-integração) e dos laços. Online, a cada nó; no fim, uma otimização em lote refina tudo.
 - **Fechamento de laço**: vocabulário ORB próprio no estilo DBoW2, consistência temporal, verificação geométrica
   (matriz fundamental e PnP com pontos triangulados) e rejeição robusta de laços errados em três camadas: porta
-  de deriva, PCM (consistência par a par, online) e GNC-TLS (no lote final).
+  de deriva, PCM (consistência par a par, online) e GNC-TLS (no lote final, partindo da solução só com a
+  odometria e só sobre laços com algum parceiro consistente no PCM -- um laço isolado não é verificável).
 - **Tempo real**: VO, BA, grafo e detector de laço rodam em processos separados. O custo do grafo foi controlado
   agrupando os fatores do VO (o `CustomFactor` do GTSAM em Python copia o grafo inteiro a cada avaliação, o que
   tornava o custo quadrático com o tamanho do mapa).
 
-## Resultados (exemplo)
+## Resultados
 
-KAIST Complex Urban, sequência **urban38** (11,2 km, 36 min, câmera + roda), uma execução:
+Os resultados da dissertação saem de uma **bateria única** (`Codes/ferramentas/bateria.py`), retomável e agendada
+para a noite, que gera tudo em `resultados/`. O índice com o estado de cada execução fica em `resultados/README.md`:
 
-| Método | ATE [m] | Deriva final [% do percurso] |
-|---|---|---|
-| Só odometria de roda | 241,6 | 4,4 |
-| VO monocular (escala da fusão, alinhado em Sim3) | 202,4 | 1,0 |
-| Fusão online (causal) | 47,4 | 0,4 |
-| **Fusão suavizada (grafo + laços)** | **9,6** | **0,3** |
+- `resultados/kaist/<seq>/<config>/` e `resultados/inomi/<seq>/<config>/`: cada execução (figuras, dados, evo; GIFs
+  na 1ª repetição do sistema completo);
+- `resultados/sintese/`: tabela de ablação e barras de erro (`ablacao/`), detector de laço isolado
+  (`detector_lacos/`), robustez a laços falsos (`lacos_falsos/`), Inomi (`inomi/`);
+- `resultados/testes_unitarios/`: histórico dos testes isolados.
 
-- 99% dos laços aceitos corretos (distância medida vs. GT); erro mediano da medida do laço: 0,25 m.
-- Processamento: 0,28 × o tempo real (36 FPS para uma câmera de 10 FPS); grafo ~21 ms por nó.
-- Como o VO não é determinístico, os números variam entre execuções; a avaliação da dissertação usa várias
-  execuções por configuração.
+Sequências: KAIST urban26/27/30/33/38/39 (avaliação), urban28/31/32/37 (**teste cego**: fora de todo ajuste e do
+treino do vocabulário) e as duas sequências da Inomi com GT.
+
+**Determinismo**: o VO puro é determinístico (execuções repetidas saem idênticas bit a bit); o sistema completo não
+(o grafo roda num processo assíncrono e realimenta a escala no VO), por isso o sistema completo é executado 3 vezes
+por sequência e as tabelas usam a mediana (e mostram mín.–máx.).
 
 **Limitações observadas**: revisitas em **sentido oposto** não são reconhecidas (a câmera frontal vê outra cena);
-paradas longas podem gerar "laços" entre o antes e o depois da parada (geometricamente corretos, mas sem
-informação nova); a estimativa online deriva entre laços.
+o VO monocular perde o rastreamento em velocidade alta (urban37, ~78 km/h) e em trânsito denso, quando a fusão cai
+para a odometria de roda (sem divergir); paradas longas podem gerar "laços" entre o antes e o depois da parada
+(geometricamente corretos, mas sem informação nova); a estimativa online deriva entre laços.
 
 ## Avaliação
 
@@ -68,7 +72,10 @@ de 100 m), cujo APE coincide com o ATE calculado pelo pipeline.
 - **[KAIST Complex Urban Dataset](https://sites.google.com/view/complex-urban-dataset)**: sequências urbanas de
   vários km (câmera estéreo, da qual se usa só a esquerda; encoders de roda; IMU; GT por SLAM com LiDAR/GNSS).
   O vocabulário do fechamento de laço foi treinado em sequências **separadas** das de teste (urban25/33/34).
-- **Robô móvel (Inomi)**: trajetos curtos de robô terrestre, com odometria e GT.
+  Teste cego: urban28/31/32/37 (nunca usadas para ajustar parâmetros). O encoder fica em `data_sensor/` ou
+  `sensor_data/`, conforme a sequência; `Codes/ferramentas/inspecionar_sequencia.py` confere uma sequência baixada.
+- **Robô móvel (Inomi)**: trajetos curtos de robô terrestre (~2,6 m), com odometria; só `dataset_16_16` e
+  `dataset_16_16_n2` têm GT.
 
 Os datasets não fazem parte deste repositório.
 
@@ -77,7 +84,7 @@ Os datasets não fazem parte deste repositório.
 ```
 Codes/
 ├── src/            biblioteca
-│   ├── VisualOdometry.py, Map.py, KeyFrame.py, BA.py   odometria visual monocular
+│   ├── VisualOdometry.py, Map.py, KeyFrame.py, BA.py   odometria visual monocular (BA fixo ou marginalizado)
 │   ├── GPO.py, Fusion.py                               grafo de fatores e fusão online
 │   ├── LoopClosure.py                                  fechamento de laço e treino do vocabulário
 │   └── Viewer.py                                       visualização ao vivo
@@ -85,11 +92,20 @@ Codes/
 │   ├── test_vo_fusion_rt.py      pipeline completo (VO + fusão + laço + avaliação + figuras)
 │   ├── testE_vo_time_satmp.py    só a odometria visual; configuração de câmera e parâmetros
 │   └── test_gpo.py               fusão offline a partir de uma trajetória do VO salva
-├── ferramentas/    análise
-│   ├── avaliar_evo.py            avaliação com o evo (APE/RPE) -> resultados/<dataset>/evo/
+├── ferramentas/    bateria e análise
+│   ├── bateria.py                bateria final (todas as sequências e configurações) + síntese -> resultados/
+│   ├── tabela_ablacao.py         tabela de ablação e barras de erro (CSV, LaTeX, figuras)
+│   ├── avaliar_lacos.py          avaliação isolada do detector de laço (recall@N, precisão, funil, cobertura)
+│   ├── lacos_falsos.py           robustez a laços falsos (repete só o grafo a partir das mensagens gravadas)
+│   ├── avaliar_evo.py            avaliação com o evo (APE/RPE)
 │   ├── make_gifs.py              GIFs para apresentação a partir de uma execução
+│   ├── inspecionar_sequencia.py  confere uma sequência do KAIST baixada (arquivos, percurso, revisitas)
+│   ├── comparar_ba.py            (antigo) VO puro, BA fixo x marginalizado; hoje feito pela bateria
 │   └── view_map.py               visualizador 3D dos mapas salvos
+├── tests/          testes isolados com dados sintéticos (rodar_testes.py; histórico em resultados/testes_unitarios)
 └── vocabularios/   vocabulários ORB do fechamento de laço
+figuras/            figuras da dissertação (TikZ) e figuras de referência
+resultados/         saídas (fora do git; ver resultados/README.md)
 ```
 
 ## Dependências

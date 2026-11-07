@@ -1,14 +1,14 @@
 """
-Análise do histórico dos testes isolados (resultados/testes/historico.csv, gravado pelo rodar_testes.py).
+Análise do histórico dos testes isolados (resultados/testes_unitarios/historico.csv, gravado pelo rodar_testes.py).
 
 Uso:
     python3 analisar_testes.py                        # execuções + comparação da última com a anterior
     python3 analisar_testes.py --a -3 --b -1          # compara duas execuções (índice, id ou rótulo)
     python3 analisar_testes.py --a "antes" --b "fix KLT"
     python3 analisar_testes.py --metrica klt ate      # histórico das métricas cujo nome contém algum filtro
-    python3 analisar_testes.py --metrica klt --fig    # ... e salva a figura (resultados/testes/analise_*.pdf)
+    python3 analisar_testes.py --metrica klt --fig    # ... e salva a figura (resultados/testes_unitarios/analise_*.pdf)
     python3 analisar_testes.py --latex                # tabela LaTeX das métricas da última execução
-    python3 analisar_testes.py --figs                 # figuras da análise em resultados/testes/<execucao B>/analise/
+    python3 analisar_testes.py --figs                 # figuras da análise em resultados/testes_unitarios/<execucao B>/analise/
     python3 analisar_testes.py --tol 5                # variação relativa (%) a partir da qual uma métrica é destacada
 
 Execução: índice (-1 = última, 0 = primeira), id (2026-10-29_14-03-12, ou o começo dele) ou rótulo.
@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(HERE)), "resultados", "testes")
+RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(HERE)), "resultados", "testes_unitarios")
 CSV_PATH = os.path.join(RESULTS_DIR, "historico.csv")
 
 
@@ -310,7 +310,7 @@ def main():
     ap.add_argument("--metrica", nargs="+", help="histórico das métricas cujo nome contém algum destes textos")
     ap.add_argument("--fig", action="store_true", help="com --metrica: salva a figura do histórico")
     ap.add_argument("--latex", action="store_true", help="tabela LaTeX das métricas da execução B (padrão: última)")
-    ap.add_argument("--figs", action="store_true", help="figuras da análise em resultados/testes/<B>/analise/")
+    ap.add_argument("--figs", action="store_true", help="figuras da análise em resultados/testes_unitarios/<B>/analise/")
     ap.add_argument("--ultimas", type=int, default=15, help="quantas execuções listar")
     args = ap.parse_args()
 

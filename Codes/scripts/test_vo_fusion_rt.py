@@ -83,7 +83,7 @@ def find_dataset_files(images_dir):
     d = os.path.abspath(images_dir)
     for _ in range(4):
         cand = {k: None for k in ("encoder", "gt", "imu", "odom")}
-        for sub in ("data_sensor", ""):
+        for sub in ("data_sensor", "sensor_data", ""):
             for k, name in (("encoder", "encoder.csv"), ("imu", "xsens_imu.csv"),
                             ("odom", "odometria_dataset.csv")):          # Inomi: pose do robô (x, y, theta)
                 p = os.path.join(d, sub, name)

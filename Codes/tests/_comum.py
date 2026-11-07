@@ -36,12 +36,12 @@ METRICAS = []          # (nome, valor, unidade) do teste em execução; o rodar_
 
 
 def metrica(nome, valor, unidade=""):
-    """Registra um número medido pelo teste (vai p/ resultados/testes/historico.csv)."""
+    """Registra um número medido pelo teste (vai p/ resultados/testes_unitarios/historico.csv)."""
     METRICAS.append((nome, float(valor), unidade))
 
 
 # ---------------------------------------------------------------- figuras
-FIG_DIR = None         # o rodar_testes.py aponta p/ resultados/testes/<execucao>/figuras (None = não gera figuras)
+FIG_DIR = None         # o rodar_testes.py aponta p/ resultados/testes_unitarios/<execucao>/figuras (None = não gera figuras)
 
 # mesmas cores das figuras do pipeline (test_vo_fusion_rt.COLORS / LOOP_COLORS)
 COR = dict(gt="#0b0b0b", vo="#2a78d6", fusao="#eb6834", aceito="#008300", rejeitado="#e34948", neutro="#8a8984",
