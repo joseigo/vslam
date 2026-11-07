@@ -136,15 +136,19 @@ def main():
                     w.writerow([ds, "cego" if ds in cego else "avaliação", k, labels[k], len(reps[ds][k]),
                                 f"{e['length']:.0f}"] + [f"{e[m]:.4f}" for m, _, _ in METRICS])
 
+    small = np.nanmedian([data[ds]["completo"]["ate"] for ds in datasets]) < 1.0      # trajetos curtos (Inomi)
+    W = max(10, max(len(mark(ds)) for ds in datasets) + 2)
     for m, name, d in METRICS:
+        if small and m in ("ate",):
+            d = 3
         print(f"\n{name}  (mediana das repetições; média ponderada pelo percurso; laços: soma; † = teste cego)")
-        print(f"{'':46s}" + "".join(f"{mark(ds):>10s}" for ds in datasets)
+        print(f"{'':46s}" + "".join(f"{mark(ds):>{W}s}" for ds in datasets)
               + "".join(f"{'média ' + g:>16s}" for g, _ in groups))
         for k in keys:
             vals = [data[ds][k][m] if k in data[ds] else np.nan for ds in datasets]
             if all(np.isnan(vals)):
                 continue
-            print(f"{labels[k]:46s}" + "".join(f"{_fmt(v, d):>10s}" for v in vals)
+            print(f"{labels[k]:46s}" + "".join(f"{_fmt(v, d):>{W}s}" for v in vals)
                   + "".join(f"{_fmt(weighted(data, l, k, m), d):>16s}" for _, l in groups))
         with open(os.path.join(out_dir, f"ablacao_{m}.tex"), "w", encoding="utf-8") as f:
             f.write("% gerado por Codes/ferramentas/tabela_ablacao.py (mediana das repetições; † = teste cego)\n")
@@ -192,11 +196,13 @@ def _fig_ablacao(data, datasets, keys, labels, cego, out_dir):
     markers = "osD^vP*Xhp<>"
     fig, axs = plt.subplots(1, 2, figsize=(12, 0.42 * len(comp) + 1.8), sharey=True)
     for ax, m, title in ((axs[0], "ate", "ATE"), (axs[1], "rpe_t", "mediana do RPE de translação")):
+        any_data = False
         for yi, k in zip(y, comp):
             r = np.array([data[ds][k][m] / data[ds]["completo"][m] if k in data[ds] else np.nan for ds in datasets])
             ok = np.isfinite(r) & (r > 0)
             if not ok.any():
                 continue
+            any_data = True
             col = GROUP_COL[group(k)]
             ax.plot([r[ok].min(), r[ok].max()], [yi, yi], color=col, lw=1.2, alpha=0.5)
             for j, ds in enumerate(datasets):
@@ -210,7 +216,10 @@ def _fig_ablacao(data, datasets, keys, labels, cego, out_dir):
             ax.scatter(g, yi, s=70, marker="|", color=TEXT, zorder=4, linewidth=2,
                        label="média geométrica" if yi == y[0] else None)
         ax.axvline(1, color=TEXT, lw=1, ls="--")
-        ax.set_xscale("log")
+        if any_data:
+            ax.set_xscale("log")
+        else:
+            ax.text(0.5, 0.5, "sem dados (percurso < 100 m)", transform=ax.transAxes, ha="center", color=TEXT)
         ax.set(xlabel="razão em relação ao sistema completo (log; > 1 = pior)", title=title)
         ax.grid(axis="y", visible=False)
     axs[0].set_yticks(y, [labels[k] for k in comp])
@@ -277,7 +286,9 @@ def _repeticoes(reps, datasets, cego, out_dir):
                 ax.plot([v.min(), v.max()], [yi + off] * 2, color=col, lw=2, alpha=0.6, solid_capstyle="round")
                 ax.scatter(v, [yi + off] * len(v), s=12, color=col, zorder=3, edgecolor="white", linewidth=0.4)
                 ax.scatter(np.median(v), yi + off, s=60, marker="|", color=TEXT, zorder=4, linewidth=1.8)
-        ax.set_xscale("log")
+        if ax.has_data() and np.any([np.isfinite(e[m]) and e[m] > 0 for ds in ds_r
+                                     for k in ("completo", "online") for e in reps[ds].get(k, [])]):
+            ax.set_xscale("log")
         ax.set_title(name)
         ax.grid(axis="y", visible=False)
     axs[0].set_yticks(y, [ds + (" (cego)" if ds in cego else "") for ds in ds_r])
