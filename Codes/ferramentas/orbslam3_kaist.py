@@ -160,6 +160,7 @@ def avaliar(out, seq_dir):
 def rodar(a):
     if not disponivel():
         raise SystemExit(f"ORB-SLAM3 não compilado ({EXE}); ver ~/sota/LEIA-ME.md")
+    a.out = os.path.abspath(a.out)                             # o executável roda com cwd = a.out
     os.makedirs(a.out, exist_ok=True)
     cfg = os.path.join(a.out, "kaist.yaml")
     escrever_config(a.images, cfg)
