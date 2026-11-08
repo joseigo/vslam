@@ -100,3 +100,51 @@ def test_sensibilidade_marca_fora_da_faixa():
     assert not D.loc["sens_enc_mais2", "fora_da_faixa"]
     assert D.loc["sens_altura_mais5", "fora_da_faixa"]
     assert abs(D.loc["sens_altura_mais5", "var_pct"] - 100 * (20 / 11 - 1)) < 1e-6
+
+
+def test_importar_slam_teaching_le_no_formato_do_pipeline():
+    """Sessão sintética do SLAM-Teaching -> conversor -> os MESMOS leitores do rodar_sistema.py (busca dos arquivos,
+    odometria por pose, GT, instante das imagens) devolvem a trajetória original, no mesmo relógio."""
+    import tempfile
+    import cv2
+    sys.path.insert(0, os.path.join(CODES_DIR, "scripts"))
+    sys.path.insert(0, os.path.join(CODES_DIR, "src"))
+    import importar_slam_teaching as ist
+    from rodar_sistema import find_dataset_files
+    from fusao_offline import load_gt
+    from GPO import PoseOdometry, image_stamp_ns
+    raiz = tempfile.mkdtemp()
+    dados = os.path.join(raiz, "dados")
+    cam = os.path.join(dados, "camera_20261108_180000")
+    os.makedirs(cam)
+    t0 = 1793041982.0
+    linhas = ["Inicio", "Fim", "Inicio"]                      # 1ª sessão vazia (como no arquivo real)
+    for k in range(50):                                       # 5 s, círculo de raio 0,5 m
+        t = t0 + 0.1 * k
+        a = 0.2 * k
+        x, y, th = 0.5 * np.sin(a), 0.5 * (1 - np.cos(a)), np.arctan2(np.sin(a), np.cos(a))   # θ em [-π, π]
+        linhas.append(f"odometria,{x:.6f},{y:.6f},{th:.6f},{t + 0.02:.6f}")
+        linhas.append(f"ground_truth,{x + 1:.6f},{y:.6f},{th:.6f},{t + 0.03:.6f}")
+        t_cap = t + 0.005
+        linhas.append(f"camera,{k},{t_cap:.6f},{t + 0.04:.6f}")
+        cv2.imwrite(os.path.join(cam, f"{int(round(t_cap * 1e6))}.jpg"), np.full((48, 64, 3), k, np.uint8))
+    linhas.append("Fim")
+    open(os.path.join(dados, "recording.csv"), "w").write("\n".join(linhas) + "\n")
+    sess = ist.ler_sessoes(os.path.join(dados, "recording.csv"))
+    out = os.path.join(raiz, "s01")
+    pasta = ist.achar_pasta_camera(dados, sess[-1]["camera"][0, 1])
+    n, r = ist.converter(sess[-1], pasta, out)
+    imgs = sorted(os.listdir(os.path.join(out, "imagens")))
+    root, files = find_dataset_files(os.path.join(out, "imagens"))
+    odo = PoseOdometry.from_csv(files["odom"])
+    t_gt, T_gt = load_gt(files["gt"])
+    t_img = np.array([image_stamp_ns(f) * 1e-9 for f in imgs])
+    _, dist, dth = odo.relative(odo.t[0], odo.t[-1])
+    print(f"{len(sess)} sessões; {n} imagens; odometria {len(odo.t)}; GT {len(t_gt)}; percurso {r['percurso_m']:.2f} m")
+    metrica("imagens_convertidas", n)
+    assert len(sess) == 2 and pasta == cam and n == 50
+    assert files["odom"] and files["gt"] and root == out
+    assert abs(t_img[0] - (t0 + 0.005)) < 1e-5                       # imagem: instante da captura, em s Unix
+    assert abs(odo.t[0] - (t0 + 0.02)) < 1e-5 and abs(t_gt[0] - (t0 + 0.03)) < 1e-5   # mesmo relógio
+    assert np.allclose(T_gt[:, 0, 3] - 1, 0.5 * np.sin(0.2 * np.arange(50)), atol=1e-5)
+    assert abs(dth - 0.2 * 49) < 1e-3
