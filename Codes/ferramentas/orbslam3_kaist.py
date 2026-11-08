@@ -116,6 +116,7 @@ def ate(ref_all, est, sim3, t_janela=None, max_dt=0.02):
     est.align(ref, correct_scale=sim3)
     ape = metrics.APE(PoseRelation.translation_part)
     ape.process_data((ref, est))
+    ate.ultimo = (ref, est, ape.error)                         # p/ a figura
     return float(ape.get_statistic(metrics.StatisticsType.rmse)), ref
 
 
@@ -135,12 +136,13 @@ def avaliar(out, seq_dir):
     est = ler_euroc(os.path.join(out, "orb_frames.txt"))
     tempos = np.loadtxt(os.path.join(out, "orb_tempos.txt"), ndmin=2)
     n_frames = len(tempos)
-    linhas = []
+    linhas, curvas = [], {}
     if est is None or est.num_poses < 10:
         linhas.append(dict(metodo="ORB-SLAM3 mono (maior mapa)", ate_m=np.nan, cobertura_pct=0.0, frames_mapa=0,
                            frames_rastreados_pct=100 * np.mean(tempos[:, 2] == 2) if n_frames else 0.0))
     else:
         e, ref = ate(gt, est, sim3=True)
+        curvas["ORB-SLAM3 mono (maior mapa, Sim(3))"] = ate.ultimo
         janela = (est.timestamps[0], est.timestamps[-1])
         linhas.append(dict(metodo="ORB-SLAM3 mono (maior mapa)", ate_m=e, cobertura_pct=100 * comprimento(ref) / L_total,
                            frames_mapa=est.num_poses, frames_rastreados_pct=100 * np.mean(tempos[:, 2] == 2),
@@ -152,9 +154,49 @@ def avaliar(out, seq_dir):
             f = os.path.join(seq_dir, arq)
             if os.path.isfile(f):
                 e2, ref2 = ate(gt, read_tum(f), sim3, t_janela=janela)
+                curvas[nome.replace(", mesmo trecho", "")] = ate.ultimo
                 linhas.append(dict(metodo=nome, ate_m=e2, cobertura_pct=100 * comprimento(ref2) / L_total))
     pd.DataFrame(linhas).to_csv(os.path.join(out, "metricas.csv"), index=False)
     print(pd.DataFrame(linhas).to_string(index=False))
+    if curvas:
+        figura(out, gt, curvas, linhas, os.path.basename(os.path.normpath(seq_dir)))
+
+
+def figura(out, gt, curvas, linhas, seq):
+    """Trajetórias no trecho coberto pelo maior mapa do ORB-SLAM3 (sobre o GT inteiro) + erro ao longo do trecho."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    cores = {"ORB-SLAM3": "#d62728", "nosso VO": "#ff7f0e", "nosso sistema": "#1f77b4", "só roda": "#7f7f7f"}
+    cor = lambda n: next((c for k, c in cores.items() if n.startswith(k)), "k")
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 5.5), gridspec_kw=dict(width_ratios=[1.1, 1]))
+    P0 = gt.positions_xyz[0]
+    g = gt.positions_xyz - P0
+    a1.plot(g[:, 0], g[:, 1], color="0.8", lw=4, label="GT (percurso inteiro)")
+    ref = next(iter(curvas.values()))[0]
+    r = ref.positions_xyz - P0
+    a1.plot(r[:, 0], r[:, 1], color="k", lw=1.5, label="GT (trecho do maior mapa do ORB-SLAM3)")
+    for nome, (ref_n, est_n, err) in curvas.items():
+        e = est_n.positions_xyz - P0
+        a1.plot(e[:, 0], e[:, 1], color=cor(nome), lw=1.2, label=f"{nome}: ATE {np.sqrt(np.mean(np.square(err))):.1f} m")
+        d = np.r_[0, np.cumsum(np.linalg.norm(np.diff(ref_n.positions_xyz, axis=0), axis=1))]
+        a2.plot(d, err, color=cor(nome), lw=1.2, label=nome)
+    cob = linhas[0].get("cobertura_pct", np.nan)
+    a1.set_title(f"{seq}: trajetórias no trecho coberto pelo ORB-SLAM3 ({cob:.0f}% do percurso)")
+    a1.set_xlabel("x [m]")
+    a1.set_ylabel("y [m]")
+    a1.axis("equal")
+    a1.legend(fontsize=8, loc="best")
+    a1.grid(alpha=0.3)
+    a2.set_title("Erro de posição no trecho (após alinhamento)")
+    a2.set_xlabel("distância percorrida no trecho [m]")
+    a2.set_ylabel("erro [m]")
+    a2.grid(alpha=0.3)
+    a2.legend(fontsize=8)
+    fig.tight_layout()
+    for ext in ("png", "pdf"):
+        fig.savefig(os.path.join(out, f"comparacao_orbslam3.{ext}"), dpi=150)
+    plt.close(fig)
 
 
 def rodar(a):
