@@ -1,6 +1,6 @@
 """
 Confere uma sequência do KAIST Complex Urban recém-baixada antes de rodar o sistema: acha imagens / encoder / GT /
-calibração (mesma busca do test_vo_fusion_rt.py), mede percurso, duração, revisitas no GT (mesmo sentido e oposto)
+calibração (mesma busca do rodar_sistema.py), mede percurso, duração, revisitas no GT (mesmo sentido e oposto)
 e fração do percurso em curva.
 
 Uso:
@@ -51,7 +51,7 @@ def inspect(root):
     img = find(root, "stereo_left", "d")
     n_img = len(glob.glob(os.path.join(img, "*.png"))) if img else 0
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
-    from test_vo_fusion_rt import find_dataset_files                # MESMA busca do script principal
+    from rodar_sistema import find_dataset_files                # MESMA busca do script principal
     _, files = find_dataset_files(img) if img else (None, {})
     enc, gt = files.get("encoder"), files.get("gt")
     calib = {k: find(root, k) for k in ("Vehicle2Stereo.txt", "EncoderParameter.txt", "left.yaml")}
@@ -66,7 +66,7 @@ def inspect(root):
         print(f"  percurso {r['km']:.1f} km, {r['min']:.0f} min | revisita no mesmo sentido {r['same_km']:.2f} km, "
               f"oposto {r['opp_km']:.2f} km | {100 * r['curve']:.0f}% em curva")
     if img and n_img:
-        print(f"  rodar: python3 Codes/scripts/test_vo_fusion_rt.py --images {img} --no-gui --out resultados/<pasta>")
+        print(f"  rodar: python3 Codes/scripts/rodar_sistema.py --images {img} --no-gui --out resultados/<pasta>")
     return ok
 
 

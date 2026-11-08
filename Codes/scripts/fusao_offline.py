@@ -5,9 +5,9 @@ Entrada: a trajetória salva pelo VO (trajectory_tum.txt, poses T_wc da câmera)
 (data_sensor/encoder.csv, poses/global_pose.csv e, se houver, data_sensor/xsens_imu.csv).
 
 Uso:
-    python3 test_gpo.py --vo trajectory_tum.txt
-    python3 test_gpo.py --vo trajectory_tum.txt --sim-imu          # IMU simulada a partir do GT (sem xsens_imu.csv)
-    python3 test_gpo.py --vo trajectory_tum.txt --modes vo+wheel --no-batch
+    python3 fusao_offline.py --vo trajectory_tum.txt
+    python3 fusao_offline.py --vo trajectory_tum.txt --sim-imu          # IMU simulada a partir do GT (sem xsens_imu.csv)
+    python3 fusao_offline.py --vo trajectory_tum.txt --modes vo+wheel --no-batch
 
 Modos: wheel | vo+wheel | vo+imu | wheel+imu | vo+wheel+imu   (o VO puro é sempre avaliado como referência)
 """

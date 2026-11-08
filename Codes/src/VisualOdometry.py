@@ -1155,7 +1155,7 @@ class VisualOdometry:
         print(f"Trajetória (TUM) salva em {filename}")
 
     def save_map(self, filename: str, ply: bool = True):
-        """Salva o mapa p/ visualizar depois (view_map.py), sem rodar o VO de novo.
+        """Salva o mapa p/ visualizar depois (visualizar_mapa.py), sem rodar o VO de novo.
         .npz: pontos válidos (N,3) + cores RGB + nº de observações, poses dos keyframes, trajetória (uma pose por
         frame + timestamps) e K. Com ply=True grava também um .ply (abre no MeshLab / CloudCompare / Open3D).
         Referencial: o do mundo do VO (= 1ª câmera: x direita, y p/ baixo, z p/ frente), escala do mapa."""

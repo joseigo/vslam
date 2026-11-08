@@ -1,5 +1,5 @@
 """
-Métricas de avaliação isoladas (scripts/test_gpo.py, scripts/test_vo_fusion_rt.py) contra resposta conhecida e o evo.
+Métricas de avaliação isoladas (scripts/fusao_offline.py, scripts/rodar_sistema.py) contra resposta conhecida e o evo.
 
 - evaluate / align (Umeyama): trajetória = Sim3 do GT -> ATE 0 e escala certa; ATE igual ao APE do evo.
 - align_at_start: o 1º ponto coincide; deriva linear dá erro final conhecido.
@@ -17,7 +17,7 @@ def _gt(n=600):
 
 
 def test_ate_umeyama_sim3():
-    from test_gpo import evaluate
+    from fusao_offline import evaluate
     t, T = _gt()
     s, R, off = 0.37, yaw_R(0.8), np.array([10.0, -4.0, 2.0])
     P = (T[:, :3, 3] @ R.T) * s + off
@@ -29,7 +29,7 @@ def test_ate_umeyama_sim3():
 
 
 def test_ate_igual_ape_do_evo():
-    from test_gpo import evaluate
+    from fusao_offline import evaluate
     try:
         from evo.core import metrics
         from evo.core.trajectory import PoseTrajectory3D
@@ -55,9 +55,9 @@ def test_ate_igual_ape_do_evo():
 
 def _fusion_module():
     try:
-        import test_vo_fusion_rt as m
+        import rodar_sistema as m
     except Exception as e:                               # (Viewer/open3d etc.)
-        skip(f"test_vo_fusion_rt não importa: {type(e).__name__}: {e}")
+        skip(f"rodar_sistema não importa: {type(e).__name__}: {e}")
     return m
 
 

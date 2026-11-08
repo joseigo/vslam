@@ -2,10 +2,10 @@
 Navegador 3D do mapa salvo pelo VO (VisualOdometry.save_map) -- não roda o VO, só carrega o arquivo.
 
 Uso:
-    python3 view_map.py mapa_vo.npz                 # nuvem + trajetória + keyframes
-    python3 view_map.py mapa_vo.npz --min-obs 3     # só pontos vistos por >= 3 keyframes (menos ruído)
-    python3 view_map.py mapa_vo.ply                 # também abre só a nuvem (.ply)
-    python3 view_map.py mapa_fundido.npz            # mapa no mundo FUNDIDO (metros, z p/ cima; Fusion.save_world_map)
+    python3 visualizar_mapa.py mapa_vo.npz                 # nuvem + trajetória + keyframes
+    python3 visualizar_mapa.py mapa_vo.npz --min-obs 3     # só pontos vistos por >= 3 keyframes (menos ruído)
+    python3 visualizar_mapa.py mapa_vo.ply                 # também abre só a nuvem (.ply)
+    python3 visualizar_mapa.py mapa_fundido.npz            # mapa no mundo FUNDIDO (metros, z p/ cima; Fusion.save_world_map)
 
 Controles (janela Open3D):
     mouse esq. = girar | dir./shift+esq. = arrastar | roda = zoom | ctrl+esq. = rolar

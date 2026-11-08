@@ -1,6 +1,6 @@
 """
 Robustez do grafo a laços FALSOS: repete só o back-end (FusionBackend) a partir das mensagens gravadas de uma execução
-real (FUSION_RECORD=arquivo.rec python3 test_vo_fusion_rt.py ...), injetando N laços errados, e mede o ATE com e sem
+real (FUSION_RECORD=arquivo.rec python3 rodar_sistema.py ...), injetando N laços errados, e mede o ATE com e sem
 cada camada de rejeição (porta de deriva, PCM, GNC-TLS).
 
 Uso:
@@ -59,7 +59,7 @@ MIN_DT = 60.0          # s entre a e b
 MIN_GT_DIST = 50.0     # m: distância real mínima entre a e b (o laço afirma ~0-8 m)
 START_FRAC = 0.05      # não injeta no começo (grafo ainda curto)
 GROUP, GROUP_STEP = 5, 4
-LOOP_GT_TOL = 5.0      # mesmo critério de test_vo_fusion_rt.py p/ laço verdadeiro correto
+LOOP_GT_TOL = 5.0      # mesmo critério de rodar_sistema.py p/ laço verdadeiro correto
 
 
 # ---------------------------------------------------------------------------------------------- replay
@@ -141,7 +141,7 @@ def replay(head, msgs, cfg_over, plan, node_t, node_frame):
 
 def run_one(job):
     rec, gt, ds, cfg, mode, n, seed, out = job
-    from test_vo_fusion_rt import describe, _match_gt
+    from rodar_sistema import describe, _match_gt
     head, msgs = _CACHE.get(rec) or _CACHE.setdefault(rec, load_rec(rec))
     t_gt, T_gt = gt
     nodes = [m for m in msgs if m.get('type') != 'loop']
@@ -206,8 +206,8 @@ def _write(path, rows):
 
 
 def main_run(args):
-    from test_vo_fusion_rt import find_dataset_files
-    from test_gpo import load_gt
+    from rodar_sistema import find_dataset_files
+    from fusao_offline import load_gt
     gt = load_gt(args.gt if args.gt else find_dataset_files(args.images)[1]["gt"])
     ds = args.dataset or os.path.basename(os.path.splitext(args.rec)[0])
     os.makedirs(args.out, exist_ok=True)

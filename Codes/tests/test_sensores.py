@@ -151,7 +151,7 @@ def test_imu_rotacao_e_aceleracao():
 
 def test_inicializacao_visual_inercial_escala():
     """VO = posição real / s_true; a IMU (sintética, sem ruído) deve devolver s_true."""
-    from test_gpo import simulate_imu
+    from fusao_offline import simulate_imu
     dt_gt = 0.01
     n = 3001                                       # 30 s
     t_gt = np.arange(n) * dt_gt
@@ -199,7 +199,7 @@ def test_acha_encoder_em_sensor_data():
     import tempfile
     import sys
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
-    from test_vo_fusion_rt import find_dataset_files
+    from rodar_sistema import find_dataset_files
     for sub in ("sensor_data", "data_sensor"):
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, sub))

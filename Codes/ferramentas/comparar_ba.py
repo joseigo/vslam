@@ -5,7 +5,7 @@ Uso:
     python3 comparar_ba.py resultados/comparacao_ba
 
 Entrada: <pasta>/<dataset>_<modo>_r<k>/ (ou <dataset>_<modo>/, tratado como r1) gerados por
-    test_vo_fusion_rt.py --no-loop --no-feedback --ba-mode <modo> --out <pasta>/<dataset>_<modo>_r<k>
+    rodar_sistema.py --no-loop --no-feedback --ba-mode <modo> --out <pasta>/<dataset>_<modo>_r<k>
 (só a linha do VO monocular é usada: sem realimentação, ela não depende da fusão). O VO tem BA assíncrono e não
 é determinístico, por isso cada configuração é repetida e a variação entre repetições é reportada.
 

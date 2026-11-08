@@ -2,15 +2,15 @@
 VO + fusão de sensores em TEMPO REAL: a cada frame roda o VisualOdometry e, em paralelo (outro processo), um grafo
 de poses (ISAM2) que funde o VO com os sensores selecionados. Mostra ao vivo a trajetória fundida (em metros).
 
-Parâmetros da câmera / VO vêm de testE_vo_time_satmp.py (mesma configuração do teste do VO).
+Parâmetros da câmera / VO vêm de rodar_vo.py (mesma configuração do teste do VO).
 
 Uso:
-    python3 test_vo_fusion_rt.py                                   # usa SENSORS / dataset_path abaixo
-    python3 test_vo_fusion_rt.py --sensors vo,wheel,imu --sim-imu  # IMU simulada do GT (o dataset não tem IMU)
-    python3 test_vo_fusion_rt.py --max-frames 2000 --no-gui
-    python3 test_vo_fusion_rt.py --no-loop                         # sem fechamento de laço (p/ comparar)
-    python3 test_vo_fusion_rt.py --no-feedback                     # VO sem a escala do grafo (VO puro, p/ comparar)
-    python3 test_vo_fusion_rt.py --vo-view                         # 3D no mundo do VO (como antes), não no fundido
+    python3 rodar_sistema.py                                   # usa SENSORS / dataset_path abaixo
+    python3 rodar_sistema.py --sensors vo,wheel,imu --sim-imu  # IMU simulada do GT (o dataset não tem IMU)
+    python3 rodar_sistema.py --max-frames 2000 --no-gui
+    python3 rodar_sistema.py --no-loop                         # sem fechamento de laço (p/ comparar)
+    python3 rodar_sistema.py --no-feedback                     # VO sem a escala do grafo (VO puro, p/ comparar)
+    python3 rodar_sistema.py --vo-view                         # 3D no mundo do VO (como antes), não no fundido
 
 Um só referencial: a escala estimada no grafo volta p/ o VO (mapa em ~metros) e o mapa/trajetória do VO são levados
 ao mundo fundido (Sim3 por nó do grafo, acompanha as correções e os laços) -> o 3D mostra o mapa já fundido.
@@ -24,19 +24,19 @@ import os
 import sys
 import time
 
-import testE_vo_time_satmp as base           # (configura BLAS c/ 1 thread antes do numpy)
+import rodar_vo as base           # (configura BLAS c/ 1 thread antes do numpy)
 import numpy as np
 from VisualOdometry import VisualOdometry
 from Viewer import FrameViewer, TrajViewer, Open3DViewer, plot_snapshot, draw_snapshot
 from GPO import GPOConfig, WheelOdometry, PoseOdometry, ImuData, image_stamp_ns
 from Fusion import OnlineFusion
 from LoopClosure import LoopClosure, LoopConfig
-from test_gpo import load_gt, simulate_imu, evaluate, save_tum
+from fusao_offline import load_gt, simulate_imu, evaluate, save_tum
 sys.path.insert(0, os.path.join(base.CODES_DIR, "ferramentas"))
 import avaliar_evo                          # noqa: E402  (avaliação com o evo -> resultados/<dataset>/evo/)
 
 # ------------------------------------------------------------------ CONFIGURAÇÃO
-dataset_path = base.dataset_path    # imagens (mesmo do testE_vo_time_satmp.py); a raiz do dataset é achada a partir dela
+dataset_path = base.dataset_path    # imagens (mesmo do rodar_vo.py); a raiz do dataset é achada a partir dela
 
 SENSORS = ["vo", "wheel"]           # opções: "vo", "wheel", "imu"  (ex.: ["vo", "imu"], ["vo", "wheel", "imu"])
 NODE_DT = 0.5                       # s entre nós do grafo
@@ -58,8 +58,8 @@ REVISIT = dict(radius=10.0,         # m: mesmo lugar no GT
                cover=50.0)          # m: trecho de revisita "coberto" se há laço aceito correto a até isso
 RPE_LENGTHS = (100, 200, 300, 400, 500, 600, 700, 800)   # m: segmentos do RPE (protocolo KITTI)
 
-SHOW_WINDOW = True                  # janela do OpenCV com os tracks (como no testE_vo_time_satmp.py)
-SHOW_3D = base.SHOW_3D              # mapa 3D ao vivo no Open3D (1ª e 3ª pessoa), como no testE_vo_time_satmp.py
+SHOW_WINDOW = True                  # janela do OpenCV com os tracks (como no rodar_vo.py)
+SHOW_3D = base.SHOW_3D              # mapa 3D ao vivo no Open3D (1ª e 3ª pessoa), como no rodar_vo.py
 SHOW_TRAJ = True                    # janela matplotlib das trajetórias (fusão x VO x GT) ao vivo
 PLOT_EVERY = 10                     # atualiza o plot das trajetórias a cada N frames
 OUT_PREFIX = "fusao"
@@ -1148,7 +1148,7 @@ def main():
                                 LoopConfig().min_f_inliers, args.node_dt)
             print(f"Funil dos laços: {fig_f} | {dados_dir}/funil_lacos.csv")
 
-    # mapa do VO (mesmas figuras do testE_vo_time_satmp.py)
+    # mapa do VO (mesmas figuras do rodar_vo.py)
     fig, ax = plt.subplots(1, 1, figsize=(10, 8))
     draw_snapshot(ax, plot_snapshot(vo, with_points=True),
                   unit="~m" if feedback else "unid.",
@@ -1167,8 +1167,8 @@ def main():
                     ax.plot(g[:, 0], g[:, 1], color=COLORS["GT"], lw=1.2, alpha=0.7, label="GT")
                     ax.legend(loc='upper right')
             print(f"Mapa no mundo fundido: {save_fig(fig, f'{args.out}_mapa_fundido_xy')}")
-        fusion.save_world_map(vo, dados("mapa_fundido.npz"))      # p/ o view_map.py (mundo fundido, metros)
-    if fusion.save_loop_snapshots(dados("grafo_lacos.npz")):     # p/ o make_gifs.py (grafo antes/depois dos laços)
+        fusion.save_world_map(vo, dados("mapa_fundido.npz"))      # p/ o visualizar_mapa.py (mundo fundido, metros)
+    if fusion.save_loop_snapshots(dados("grafo_lacos.npz")):     # p/ o gerar_gifs.py (grafo antes/depois dos laços)
         print(f"Estados do grafo nos laços: {dados('grafo_lacos.npz')}")
     vo.Map.plot_map_points(mode='3D', save=f"{args.out}_mapa_3d.{FIG_FORMAT}", show=False)
     print(f"Mapa do VO: {args.out}_vo_trajetoria_xz.{FIG_FORMAT}, {args.out}_mapa_3d.{FIG_FORMAT}")

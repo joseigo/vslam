@@ -22,7 +22,7 @@ import numpy as np                      # noqa: E402
 import gtsam                            # noqa: E402
 from gtsam import Pose3, Rot3           # noqa: E402
 
-# K e distorção do urban25-34 (left.yaml), as mesmas de testE_vo_time_satmp.CAMERAS["urban"]
+# K e distorção do urban25-34 (left.yaml), as mesmas de rodar_vo.CAMERAS["urban"]
 K_URBAN = np.array([[816.9037899277, 0.505101667, 608.5072628169],
                     [0., 811.5680382849, 263.4759976444],
                     [0., 0., 1.]])
@@ -43,7 +43,7 @@ def metrica(nome, valor, unidade=""):
 # ---------------------------------------------------------------- figuras
 FIG_DIR = None         # o rodar_testes.py aponta p/ resultados/testes_unitarios/<execucao>/figuras (None = não gera figuras)
 
-# mesmas cores das figuras do pipeline (test_vo_fusion_rt.COLORS / LOOP_COLORS)
+# mesmas cores das figuras do pipeline (rodar_sistema.COLORS / LOOP_COLORS)
 COR = dict(gt="#0b0b0b", vo="#2a78d6", fusao="#eb6834", aceito="#008300", rejeitado="#e34948", neutro="#8a8984",
            texto="#52514e", grade="#e4e3df")
 

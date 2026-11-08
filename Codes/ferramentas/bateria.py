@@ -39,7 +39,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CODES = os.path.dirname(HERE)
 DISSERT = os.path.dirname(CODES)
 RES = os.path.join(DISSERT, "resultados")
-PIPE = os.path.join(CODES, "scripts", "test_vo_fusion_rt.py")
+PIPE = os.path.join(CODES, "scripts", "rodar_sistema.py")
 PY = sys.executable
 DATASETS = "/home/joseigo/Documentos/TCC/Datasets"
 INOMI = "/home/joseigo/Documentos/TCC/dataset_inomi"
@@ -135,7 +135,7 @@ class Job:
         img = images_dir(self.seq)
         env = dict(os.environ, OPENBLAS_NUM_THREADS="1", MPLBACKEND="Agg")
         if self.cfg == "gifs":
-            return [PY, os.path.join(HERE, "make_gifs.py"), os.path.join(self.base, "completo_r1")], env
+            return [PY, os.path.join(HERE, "gerar_gifs.py"), os.path.join(self.base, "completo_r1")], env
         if self.cfg == "detector":
             return [PY, os.path.join(HERE, "avaliar_lacos.py"), "--images", img, "--out", self.out], env
         if self.cfg == "lacos_falsos":

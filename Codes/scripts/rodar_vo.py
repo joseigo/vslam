@@ -160,7 +160,7 @@ VIEW3D_MAX_FPS = 30     # pose/trajetória enviadas no máx. N vezes/s (descarta
 VIEW3D_POINTS_EVERY = 0.5  # nuvem de pontos reenviada a cada X s (montar o snapshot custa CPU, cresce com o mapa)
 SAVE_PLOTS = True       # ao fim: matplotlib plota e salva os gráficos (PNG)
 SHOW_PLOTS = True       # ...e mostra as janelas (False = só salva)
-MAP_FILE = "mapa_vo.npz"  # mapa salvo no fim (+ mapa_vo.ply) em resultados/<dataset>/vo_puro/; veja com view_map.py
+MAP_FILE = "mapa_vo.npz"  # mapa salvo no fim (+ mapa_vo.ply) em resultados/<dataset>/vo_puro/; veja com visualizar_mapa.py
 WINDOW_MAX_FPS = 25     # a janela do OpenCV mostra no máx. N frames/s (o VO continua processando todos)
 CV_THREADS = None       # threads internas do OpenCV no processo principal (None = padrão do OpenCV)
 
@@ -286,7 +286,7 @@ def run_dataset_test(path=dataset_path, enable_plot=True):
 
     vo.save_keyframes_info(os.path.join(out, "keyframes_info.csv"))
     vo.save_trajectory(os.path.join(out, "trajectory_tum.txt"))
-    vo.save_map(os.path.join(out, MAP_FILE))        # depois: python3 ferramentas/view_map.py <out>/mapa_vo.npz
+    vo.save_map(os.path.join(out, MAP_FILE))        # depois: python3 ferramentas/visualizar_mapa.py <out>/mapa_vo.npz
     vo.Map.summary()
 
     if frame_view is not None:

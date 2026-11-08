@@ -594,7 +594,7 @@ class OnlineFusion:
         return snap
 
     def save_loop_snapshots(self, filename: str) -> int:
-        """Estado do grafo (posições dos nós, mundo do grafo) antes/depois de cada laço -> make_gifs.py."""
+        """Estado do grafo (posições dos nós, mundo do grafo) antes/depois de cada laço -> gerar_gifs.py."""
         S = self.loop_snaps
         if not S:
             return 0
@@ -605,7 +605,7 @@ class OnlineFusion:
         return len(S)
 
     def save_world_map(self, vo, filename: str, ply: bool = True) -> bool:
-        """Mapa do VO no mundo FUNDIDO, no formato de VisualOdometry.save_map (abre no view_map.py): pontos, cores,
+        """Mapa do VO no mundo FUNDIDO, no formato de VisualOdometry.save_map (abre no visualizar_mapa.py): pontos, cores,
         nº de observações, poses dos keyframes e da câmera por frame (rígidas, em metros). Cada frame/landmark usa a
         Sim3 do nó do grafo anterior a ele (como world_snapshot). Referencial: veículo no 1º nó (x frente, y esq.,
         z cima) -> up='z'. Chamar depois da otimização final (est = poses suavizadas)."""

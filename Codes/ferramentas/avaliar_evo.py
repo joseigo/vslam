@@ -6,7 +6,7 @@ Uso:
     python3 avaliar_evo.py resultados/urban38 --delta 50 # RPE em segmentos de 50 m
 
 Entrada: resultados/<dataset>/evo/*.txt em TUM padrão (tempo em s): gt.txt + um arquivo por método, todos no
-referencial do VEÍCULO (gravados pelo test_vo_fusion_rt.py). Se a pasta não existir (execuções antigas), monta a
+referencial do VEÍCULO (gravados pelo rodar_sistema.py). Se a pasta não existir (execuções antigas), monta a
 partir de dados/{online,suavizado,vo}_tum.txt e do GT do dataset.
 
 Saída em resultados/<dataset>/evo/:
@@ -71,7 +71,7 @@ def _fallback(res_dir, evo_dir):
     here = os.path.dirname(os.path.abspath(__file__))
     sys.path.insert(0, os.path.join(here, "..", "scripts"))
     sys.path.insert(0, os.path.join(here, "..", "src"))
-    from test_gpo import load_gt
+    from fusao_offline import load_gt
     gt = None
     d = os.path.abspath(imgs)
     for _ in range(5):
@@ -92,7 +92,7 @@ def _fallback(res_dir, evo_dir):
         T[:, :3, :3] = Slerp(t_gt, Rotation.from_matrix(T_gt[:, :3, :3]))(ts).as_matrix()
         T[:, :3, 3] = np.column_stack([np.interp(ts, t_gt, T_gt[:, i, 3]) for i in range(3)])
         t_gt, T_gt = ts, T
-        if "inomi" in gt.lower():                  # GT da Inomi: eixo 'frente' do corpo = y (ver test_vo_fusion_rt)
+        if "inomi" in gt.lower():                  # GT da Inomi: eixo 'frente' do corpo = y (ver rodar_sistema)
             T_gt[:, :3, :3] = T_gt[:, :3, :3] @ Rotation.from_euler('z', 90, degrees=True).as_matrix()
     write_tum(os.path.join(evo_dir, "gt.txt"), t_gt, T_gt)
     from GPO import R_VC_NOMINAL

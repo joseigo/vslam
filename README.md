@@ -89,19 +89,19 @@ Codes/
 │   ├── LoopClosure.py                                  fechamento de laço e treino do vocabulário
 │   └── Viewer.py                                       visualização ao vivo
 ├── scripts/        execução
-│   ├── test_vo_fusion_rt.py      pipeline completo (VO + fusão + laço + avaliação + figuras)
-│   ├── testE_vo_time_satmp.py    só a odometria visual; configuração de câmera e parâmetros
-│   └── test_gpo.py               fusão offline a partir de uma trajetória do VO salva
+│   ├── rodar_sistema.py      pipeline completo (VO + fusão + laço + avaliação + figuras)
+│   ├── rodar_vo.py    só a odometria visual; configuração de câmera e parâmetros
+│   └── fusao_offline.py               fusão offline a partir de uma trajetória do VO salva
 ├── ferramentas/    bateria e análise
 │   ├── bateria.py                bateria final (todas as sequências e configurações) + síntese -> resultados/
 │   ├── tabela_ablacao.py         tabela de ablação e barras de erro (CSV, LaTeX, figuras)
 │   ├── avaliar_lacos.py          avaliação isolada do detector de laço (recall@N, precisão, funil, cobertura)
 │   ├── lacos_falsos.py           robustez a laços falsos (repete só o grafo a partir das mensagens gravadas)
 │   ├── avaliar_evo.py            avaliação com o evo (APE/RPE)
-│   ├── make_gifs.py              GIFs para apresentação a partir de uma execução
+│   ├── gerar_gifs.py              GIFs para apresentação a partir de uma execução
 │   ├── inspecionar_sequencia.py  confere uma sequência do KAIST baixada (arquivos, percurso, revisitas)
 │   ├── comparar_ba.py            (antigo) VO puro, BA fixo x marginalizado; hoje feito pela bateria
-│   └── view_map.py               visualizador 3D dos mapas salvos
+│   └── visualizar_mapa.py               visualizador 3D dos mapas salvos
 ├── tests/          testes isolados com dados sintéticos (rodar_testes.py; histórico em resultados/testes_unitarios)
 └── vocabularios/   vocabulários ORB do fechamento de laço
 figuras/            figuras da dissertação (TikZ) e figuras de referência

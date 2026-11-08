@@ -4,7 +4,7 @@ Tabelas e figuras de síntese da bateria (ablação + repetições) do sistema c
 Uso:
     python3 tabela_ablacao.py resultados/kaist --out resultados/sintese/ablacao --cego urban28,urban31,urban32,urban37
 
-Entrada: <pasta>/<dataset>/<configuração>/dados/{metricas,lacos}.csv gerados por test_vo_fusion_rt.py. Uma
+Entrada: <pasta>/<dataset>/<configuração>/dados/{metricas,lacos}.csv gerados por rodar_sistema.py. Uma
 configuração pode ter repetições (<configuração>_r1, _r2, ...): cada métrica entra pela MEDIANA das repetições.
 Linhas da tabela:
     - referências: só odometria de rodas, só VO (BA fixo e marginalizado), fusão online do sistema completo;

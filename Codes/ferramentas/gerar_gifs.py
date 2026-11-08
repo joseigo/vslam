@@ -1,9 +1,9 @@
 """
-GIFs para apresentação a partir de uma pasta de resultados do test_vo_fusion_rt.py (não roda o VO de novo).
+GIFs para apresentação a partir de uma pasta de resultados do rodar_sistema.py (não roda o VO de novo).
 
 Uso:
-    python3 Codes/ferramentas/make_gifs.py resultados/urban38              # todos, em resultados/urban38/gifs/
-    python3 Codes/ferramentas/make_gifs.py resultados/urban38 --only 1,3   # só alguns
+    python3 Codes/ferramentas/gerar_gifs.py resultados/urban38              # todos, em resultados/urban38/gifs/
+    python3 Codes/ferramentas/gerar_gifs.py resultados/urban38 --only 1,3   # só alguns
 
 GIFs (cada um só é gerado se os dados existirem em <pasta>/dados/):
     1_trajetoria_ao_vivo.gif     fusão online x só roda x GT ao longo do tempo, laços acontecendo e o erro caindo
@@ -250,7 +250,7 @@ def loop_events(d, n_events, tag):
     path = os.path.join(d["D"], "grafo_lacos.npz")
     if not os.path.isfile(path):
         print(f"  ({tag}) " + ("nenhum laço aceito nesta execução" if not accepted_loops(d) else
-                               "sem dados/grafo_lacos.npz: rode o test_vo_fusion_rt.py de novo p/ gerar"))
+                               "sem dados/grafo_lacos.npz: rode o rodar_sistema.py de novo p/ gerar"))
         return [], None
     z = np.load(path)
     nt = z["node_t"] - d["t0"]
@@ -465,7 +465,7 @@ def gif_otimizacao_global(d, out, fps=12):
 def gif_mapa(d, out, n_frames=110, fps=11, max_pts=45000):
     path = os.path.join(d["D"], "mapa_fundido.npz")
     if not os.path.isfile(path):
-        print("  (5) sem dados/mapa_fundido.npz: rode o test_vo_fusion_rt.py de novo p/ gerar")
+        print("  (5) sem dados/mapa_fundido.npz: rode o rodar_sistema.py de novo p/ gerar")
         return
     from scipy.spatial import cKDTree
     z = np.load(path)
