@@ -880,6 +880,13 @@ def main():
                     help="m de roda p/ estimar a escala inicial do VO (padrão: 5 no KAIST, 0.5 na Inomi)")
     ap.add_argument("--camera", default="auto", choices=["auto"] + list(base.CAMERAS),
                     help="calibração (auto: 'inomi' p/ pastas dataset_inomi / nomes AAAAMMDD_HHMMSS_micro)")
+    # sensibilidade a erros dos sensores (perturbações deliberadas da calibração)
+    ap.add_argument("--enc-escala", type=float, default=1.0,
+                    help="multiplica o diâmetro das rodas (ex.: 1.02 = encoder 2%% maior que o real)")
+    ap.add_argument("--altura-delta", type=float, default=0.0,
+                    help="m somados à altura da câmera sobre o chão (Vehicle2Stereo), ex.: 0.05")
+    ap.add_argument("--atraso-roda", type=float, default=0.0,
+                    help="s somados ao relógio da roda (erro de sincronismo roda-câmera), ex.: 0.05")
     args = ap.parse_args()
     sensors = [s.strip() for s in args.sensors.split(",") if s.strip()]
     gui = not args.no_gui
@@ -903,9 +910,15 @@ def main():
     wheel = imu = None
     if "wheel" in sensors:
         if files["encoder"]:
-            wheel = WheelOdometry.from_csv(files["encoder"], time_offset=TIME_OFFSETS["wheel"])
+            wheel = WheelOdometry.from_csv(files["encoder"], time_offset=TIME_OFFSETS["wheel"] + args.atraso_roda)
+            if args.enc_escala != 1.0:                    # diâmetros das duas rodas errados pelo mesmo fator
+                for a in ("dl", "dr", "ds", "dth"):
+                    setattr(wheel, a, getattr(wheel, a) * args.enc_escala)
+                print(f"PERTURBAÇÃO: diâmetro das rodas x {args.enc_escala}")
+            if args.atraso_roda:
+                print(f"PERTURBAÇÃO: relógio da roda {args.atraso_roda * 1e3:+.0f} ms")
         elif files["odom"]:
-            wheel = PoseOdometry.from_csv(files["odom"], time_offset=TIME_OFFSETS["wheel"])
+            wheel = PoseOdometry.from_csv(files["odom"], time_offset=TIME_OFFSETS["wheel"] + args.atraso_roda)
         else:
             sensors = [s for s in sensors if s != "wheel"]
             print("AVISO: 'wheel' selecionado, mas não há encoder.csv nem odometria_dataset.csv -> sem roda "
@@ -933,9 +946,14 @@ def main():
                               body_yaw_deg=GT_BODY_YAW_DEG.get(cam, 0.0))
     print(f"Câmera: {cam} (fx={K_cam[0, 0]:.1f}, cx={K_cam[0, 2]:.1f}{', com distorção' if dist_cam is not None else ''})")
 
+    vo_kp = dict(base.vo_params_for(args.images), ba_mode=args.ba_mode, **_overrides(args.vo))
+    if args.altura_delta:
+        if vo_kp.get("camera_height") is None:
+            raise SystemExit("--altura-delta exige altura conhecida da câmera (Vehicle2Stereo.txt ou --vo camera_height=)")
+        vo_kp["camera_height"] = float(vo_kp["camera_height"]) + args.altura_delta
+        print(f"PERTURBAÇÃO: altura da câmera {args.altura_delta * 100:+.0f} cm -> {vo_kp['camera_height']:.3f} m")
     vo = VisualOdometry(camera_matrix=K_cam, dist_coeffs=dist_cam, orb_params=base.orb_params,
-                        lk_params=base.lk_params, keyframe_params=dict(base.vo_params_for(args.images), ba_mode=args.ba_mode,
-                                                                       **_overrides(args.vo)),
+                        lk_params=base.lk_params, keyframe_params=vo_kp,
                         sliding_window_size=8,
                         enable_plot=False, verbose=False, async_ba=base.ASYNC_BA)
     feedback = SCALE_FEEDBACK and not args.no_feedback and ("wheel" in sensors or "imu" in sensors)

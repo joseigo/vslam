@@ -2,7 +2,7 @@
 Bateria final de testes da dissertação: roda tudo, retomável, em ordem de prioridade, e gera a síntese.
 
 Uso:
-    python3 Codes/ferramentas/bateria.py                 # roda o que falta (2 execuções em paralelo) até as 08:00
+    python3 Codes/ferramentas/bateria.py                 # roda o que falta (2 execuções em paralelo) até as 09:30
     python3 Codes/ferramentas/bateria.py --ate 07:30     # outro horário-limite p/ INICIAR execuções
     python3 Codes/ferramentas/bateria.py --sem-limite    # sem horário-limite
     python3 Codes/ferramentas/bateria.py --estado        # só mostra o que está feito / faltando
@@ -61,7 +61,15 @@ CONFIGS = {
     "sem_gnc": ["--gpo", "loop_gnc=False"],
     "sem_rejeicao": ["--gpo", "loop_gate_min=1e9", "--gpo", "loop_gate_rot=1e9", "--gpo", "loop_pcm_chi2=inf",
                      "--gpo", "loop_min_clique=1", "--gpo", "loop_gnc=False"],
+    # sensibilidade a erros de calibração dos sensores (só nas sequências de avaliação)
+    "sens_enc_mais2": ["--enc-escala", "1.02"],
+    "sens_enc_menos2": ["--enc-escala", "0.98"],
+    "sens_altura_mais5": ["--altura-delta", "0.05"],
+    "sens_altura_menos5": ["--altura-delta", "-0.05"],
+    "sens_atraso_mais50": ["--atraso-roda", "0.05"],
+    "sens_atraso_menos50": ["--atraso-roda", "-0.05"],
 }
+SENS = [c for c in CONFIGS if c.startswith("sens_")]
 N_REP = 3
 FASES = [                                       # (nome, [configurações]) -- em ordem de prioridade
     ("sistema completo (r1)", ["completo_r1"]),
@@ -71,7 +79,19 @@ FASES = [                                       # (nome, [configurações]) -- e
     ("camadas de rejeição de laço", ["sem_porta", "sem_pcm", "sem_gnc", "sem_rejeicao"]),
     ("detector de laço (isolado)", ["detector"]),
     ("laços falsos (replay do grafo)", ["lacos_falsos"]),
+    ("ORB-SLAM3 monocular (estado da arte)", ["orbslam3_r1"]),
+    ("sensibilidade a erros dos sensores", SENS),
+    ("repetições do ORB-SLAM3", ["orbslam3_r2", "orbslam3_r3"]),
 ]
+ORB_CFGS = ("orbslam3_r1", "orbslam3_r2", "orbslam3_r3")
+
+
+def orbslam3_disponivel():
+    try:
+        import orbslam3_kaist
+        return orbslam3_kaist.disponivel()
+    except Exception:                                                      # noqa: BLE001
+        return False
 LOG_DIR = os.path.join(RES, "bateria")
 
 
@@ -100,7 +120,7 @@ class Job:
     def __init__(self, fase, seq, cfg):
         self.fase, self.seq, self.cfg = fase, seq, cfg
         self.base = os.path.join(RES, group(seq), seq)
-        self.weight = 2 if cfg == "lacos_falsos" else 1        # lacos_falsos usa 2 processos
+        self.weight = 2 if cfg == "lacos_falsos" or cfg in ORB_CFGS else 1   # usam 2+ processos/threads
 
     @property
     def name(self):
@@ -117,7 +137,7 @@ class Job:
         return os.path.join(self.base, self.cfg)
 
     def done(self):
-        if self.cfg in ("gifs", "detector", "lacos_falsos"):
+        if self.cfg in ("gifs", "detector", "lacos_falsos") or self.cfg in ORB_CFGS:
             return os.path.isfile(os.path.join(self.out, ".feito"))
         return os.path.isfile(os.path.join(self.out, "dados", "metricas.csv"))
 
@@ -126,6 +146,9 @@ class Job:
         r1 = os.path.join(self.base, "completo_r1")
         if self.cfg == "gifs":
             return os.path.isfile(os.path.join(r1, "dados", "metricas.csv"))
+        if self.cfg in ORB_CFGS:                               # avalia no mesmo trecho que o nosso VO/sistema
+            return all(os.path.isfile(os.path.join(self.base, c, "dados", "metricas.csv"))
+                       for c in ("completo_r1", "sem_realimentacao"))
         if self.cfg == "lacos_falsos":
             return os.path.isfile(os.path.join(self.base, "completo_r1.rec")) and \
                 os.path.isfile(os.path.join(r1, "dados", "metricas.csv"))
@@ -141,6 +164,8 @@ class Job:
         if self.cfg == "lacos_falsos":
             return [PY, os.path.join(HERE, "lacos_falsos.py"), "--rec", os.path.join(self.base, "completo_r1.rec"),
                     "--images", img, "--dataset", self.seq, "--out", self.out, "--sementes", "2", "-j", "2"], env
+        if self.cfg in ORB_CFGS:
+            return [PY, os.path.join(HERE, "orbslam3_kaist.py"), "rodar", "--images", img, "--out", self.out], env
         cfg = self.cfg.split("_r")[0] if self.cfg.startswith("completo_r") else self.cfg
         if self.cfg == "completo_r1":
             env["FUSION_RECORD"] = os.path.join(self.base, "completo_r1.rec")
@@ -168,6 +193,10 @@ def jobs():
             for seq in all_seqs():
                 if seq.startswith("dataset") and cfg in ("detector", "lacos_falsos"):
                     continue                                     # Inomi: 2,6 m, sem revisitas
+                if cfg in ORB_CFGS and (seq.startswith("dataset") or not orbslam3_disponivel()):
+                    continue                                     # só KAIST, e só depois de compilar o ORB-SLAM3
+                if cfg in SENS and seq not in KAIST_AVAL:
+                    continue                                     # sensibilidade: só as 6 de avaliação
                 if FILTRO["seqs"] and seq not in FILTRO["seqs"] or FILTRO["configs"] and cfg not in FILTRO["configs"]:
                     continue
                 out.append(Job(fase, seq, cfg))
@@ -275,6 +304,15 @@ def sintese():
         _sh([PY, os.path.join(HERE, "tabela_ablacao.py"), os.path.join(RES, "kaist"), "--out",
              os.path.join(S, "ablacao"), "--cego", ",".join(KAIST_CEGO)], "sintese_ablacao.txt")
         shutil.copy(os.path.join(LOG_DIR, "sintese_ablacao.txt"), os.path.join(S, "ablacao", "tabela.txt"))
+        _sh([PY, os.path.join(HERE, "lacos_ponta_a_ponta.py"), os.path.join(RES, "kaist"), "--out",
+             os.path.join(S, "lacos_ponta_a_ponta"), "--configs", "completo,sem_porta,sem_pcm,sem_gnc,sem_rejeicao"],
+            "sintese_lacos_ponta_a_ponta.txt")
+        if glob.glob(os.path.join(RES, "kaist", "*", "orbslam3_r*", "metricas.csv")):
+            _sh([PY, os.path.join(HERE, "orbslam3_kaist.py"), "resumo", os.path.join(RES, "kaist"), "--out",
+                 os.path.join(S, "orbslam3")], "sintese_orbslam3.txt")
+        if glob.glob(os.path.join(RES, "kaist", "*", "sens_*", "dados", "metricas.csv")):
+            _sh([PY, os.path.join(HERE, "tabela_sensibilidade.py"), os.path.join(RES, "kaist"), "--out",
+                 os.path.join(S, "sensibilidade")], "sintese_sensibilidade.txt")
     if glob.glob(os.path.join(RES, "inomi", "*", "completo_r*", "dados", "metricas.csv")):
         _sh([PY, os.path.join(HERE, "tabela_ablacao.py"), os.path.join(RES, "inomi"), "--out",
              os.path.join(S, "inomi")], "sintese_inomi.txt")
@@ -344,7 +382,7 @@ def indice():
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--paralelo", type=int, default=2)
-    ap.add_argument("--ate", default="08:00", help="horário-limite p/ INICIAR execuções (HH:MM)")
+    ap.add_argument("--ate", default="09:30", help="horário-limite p/ INICIAR execuções (HH:MM)")
     ap.add_argument("--sem-limite", action="store_true")
     ap.add_argument("--estado", action="store_true")
     ap.add_argument("--sintese", action="store_true")

@@ -55,3 +55,48 @@ def test_plano_lacos_falsos_em_grupo():
         assert len(g) == lf.GROUP
         assert np.all(np.diff([x['a'] for x in g]) == lf.GROUP_STEP)
         assert np.all(np.diff([x['b'] for x in g]) == lf.GROUP_STEP)
+
+
+def test_lacos_ponta_a_ponta_classifica_camadas(tmp_path=None):
+    """Cada laço entregue ao grafo cai em exatamente uma camada; 'ruim' = correct False; 'grosseiro' = erro > 50 m."""
+    import tempfile
+    import pandas as pd
+    import lacos_ponta_a_ponta as lp
+    raiz = tempfile.mkdtemp()
+    linhas = [("aceito (GNC)", "aceito", True, 1.0), ("aceito (GNC)", "aceito", False, 8.0),
+              ("porta", "porta", False, 300.0), ("fora do clique (PCM)", "rejeitado", False, 60.0),
+              ("rejeitado (GNC)", "rejeitado", True, 2.0), ("ativo", "aceito", True, 0.5)]
+    d = os.path.join(raiz, "urbanX", "completo_r1", "dados")
+    os.makedirs(d)
+    pd.DataFrame([dict(t_a=0, t_b=100, status=s, kind=k, correct=c, stop=False, meas_err=e) for s, k, c, e in linhas]
+                 ).to_csv(os.path.join(d, "lacos.csv"), index=False)
+    R = lp.resumir(lp.carregar(raiz, "completo")).loc["TOTAL"]
+    print(R.to_dict())
+    metrica("lacos_classificados", R.entregues)
+    assert R.entregues == 6 and R.ruins == 3 and R.grosseiros == 2
+    assert R.barrados_porta == 1 and R.barrados_pcm == 1 and R.barrados_gnc == 1
+    assert R.aceitos == 3 and R.aceitos_ruins == 1 and R.bons_barrados == 1
+    assert R.barrados_porta + R.barrados_pcm + R.barrados_gnc + R.aceitos == R.entregues
+
+
+def test_sensibilidade_marca_fora_da_faixa():
+    """Perturbação só conta como efeito se o ATE sair da faixa [mín, máx] das repetições sem perturbação."""
+    import tempfile
+    import subprocess
+    import pandas as pd
+    raiz = tempfile.mkdtemp()
+    cols = "metodo,ate_m\n"
+    for nome, ate in (("completo_r1", 10.0), ("completo_r2", 12.0), ("completo_r3", 11.0),
+                      ("sens_enc_mais2", 11.5), ("sens_altura_mais5", 20.0)):
+        d = os.path.join(raiz, "urbanX", nome, "dados")
+        os.makedirs(d)
+        open(os.path.join(d, "metricas.csv"), "w").write(cols + f"fusão suavizada,{ate}\nodometria de rodas,50\n")
+    out = os.path.join(raiz, "out")
+    subprocess.check_call([sys.executable, os.path.join(CODES_DIR, "ferramentas", "tabela_sensibilidade.py"), raiz,
+                           "--out", out], stdout=subprocess.DEVNULL)
+    D = pd.read_csv(os.path.join(out, "sensibilidade.csv")).set_index("config")
+    print(D[["ate", "var_pct", "fora_da_faixa"]])
+    metrica("var_altura_pct", D.loc["sens_altura_mais5", "var_pct"], "%")
+    assert not D.loc["sens_enc_mais2", "fora_da_faixa"]
+    assert D.loc["sens_altura_mais5", "fora_da_faixa"]
+    assert abs(D.loc["sens_altura_mais5", "var_pct"] - 100 * (20 / 11 - 1)) < 1e-6
