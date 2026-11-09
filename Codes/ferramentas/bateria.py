@@ -262,10 +262,10 @@ def run(args):
         for j in list(pend):                                   # inicia as prontas, em ordem de prioridade
             if used >= args.paralelo:
                 break
-            if used + j.weight > args.paralelo and running:
-                continue
             if not j.ready():
                 continue
+            if used + j.weight > args.paralelo and running:
+                break            # tarefa pesada espera as vagas (sem isso, as leves de menor prioridade a atropelam)
             pend.remove(j)
             cmd, env = j.command()
             if None in cmd:
