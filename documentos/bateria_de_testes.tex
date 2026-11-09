@@ -1,0 +1,510 @@
+% Bateria final de testes da dissertação: o que é testado, como, por quê, e o que saiu até agora.
+% Compilar a partir desta pasta:  latexmk -pdf bateria_de_testes.tex
+% As tabelas \input{...} vêm de ../resultados/sintese (regeneradas pela bateria a cada síntese).
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{lscape}
+\usepackage[hidelinks]{hyperref}
+\setlist{nosep,leftmargin=*}
+\newcommand{\cmd}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\sint}{../resultados/sintese}
+\newcommand{\tabelagerada}[2]{%
+  \IfFileExists{#1}{\resizebox{#2}{!}{\input{#1}}}{\fbox{\parbox{0.9\linewidth}{\centering\small
+  Tabela ainda não gerada: \texttt{\detokenize{#1}}}}}}
+\newcommand{\figurase}[2]{%
+  \IfFileExists{#1}{\includegraphics[width=#2]{#1}}{\fbox{\parbox{0.9\linewidth}{\centering\small
+  Figura ainda não gerada: \texttt{\detokenize{#1}}}}}}
+
+\title{Bateria final de testes\\[2pt]\large Fusão de odometria visual monocular e odometria de rodas em grafo de fatores,\\ com fechamento de laço}
+\author{Documento de trabalho da dissertação}
+\date{Estado em 9 de novembro de 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Este documento descreve a bateria de testes que gera todos os números da dissertação: o sistema avaliado, os dados, as
+métricas, cada experimento (ablação, repetições, teste cego, detector de laço isolado, robustez a laços falsos, laços de
+ponta a ponta, sensibilidade a erros dos sensores, sensibilidade da porta de deriva e comparação com o ORB-SLAM3), a forma
+de execução (orquestrador retomável, agendado à noite) e os resultados obtidos até a data. As tabelas de ablação, de
+sensibilidade e de laços de ponta a ponta são importadas diretamente dos arquivos gerados pela bateria e se atualizam a
+cada síntese; as demais trazem os números da data acima.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+%=====================================================================================================================
+\section{Objetivo}
+
+A bateria responde a quatro perguntas:
+\begin{enumerate}
+  \item \textbf{Quanto o sistema melhora} em relação a cada sensor sozinho (só roda, só odometria visual)?
+  \item \textbf{De onde vem o ganho}: qual a contribuição de cada componente (fechamento de laço, realimentação de
+        escala, âncora pelo chão, marginalização no BA, camadas de rejeição de laço)?
+  \item \textbf{O resultado generaliza}? Sequências fora do ajuste (teste cego), repetições do sistema não
+        determinístico, perturbações de calibração e laços falsos adversários.
+  \item \textbf{Como se compara ao estado da arte} (ORB-SLAM3 monocular) no mesmo protocolo?
+\end{enumerate}
+
+Antes da bateria, os resultados vinham de execuções avulsas feitas com versões diferentes do código, o que dificultava a
+comparação. A bateria fixa uma versão do código (registrada por commit no índice \cmd{resultados/README.md}), roda tudo
+com ela e arquiva os resultados anteriores em \cmd{resultados/_arquivo/2026-11-07_antes_da_bateria/}.
+
+%=====================================================================================================================
+\section{Sistema avaliado}
+\label{sec:sistema}
+
+\subsection{Visão geral}
+\begin{itemize}
+  \item \textbf{Odometria visual (VO) monocular}: rastreamento KLT com checagem \emph{forward-backward}, keyframes,
+        triangulação e BA local em janela deslizante (8 keyframes). Dois modos de \emph{gauge} do BA: fixar os 2
+        keyframes mais antigos (\emph{fix}, padrão) ou marginalizar o keyframe que sai (complemento de Schur com FEJ,
+        \emph{marg}). A escala monocular é ancorada pela altura conhecida da câmera sobre o chão (pontos do plano do
+        chão) e, opcionalmente, realimentada pela escala estimada no grafo.
+  \item \textbf{Odometria de rodas}: modelo diferencial plano a partir dos encoders (KAIST) ou pose do robô (Inomi).
+        É a única fonte de escala métrica do sistema.
+  \item \textbf{Grafo de fatores} (GTSAM, iSAM2), com um nó a cada 0,5\,s:
+        fatores de VO (movimento relativo com escala $\exp(S_i)$ por nó, kernel de Huber), passeio aleatório da escala,
+        fatores de roda e fatores de laço 4-DoF ($x, y, z$ e guinada, como no VINS-Mono~\cite{qin2018vins}).
+        No fim, um lote (Levenberg--Marquardt) refina tudo: é a \emph{fusão suavizada}. A estimativa disponível no
+        instante de cada frame é a \emph{fusão online} (causal).
+  \item \textbf{Fechamento de laço}: detector por saco de palavras visuais (estilo DBoW2~\cite{galvez2012dbow}) com
+        ilhas temporais e consistência em 3 consultas seguidas, verificação geométrica por matriz fundamental
+        ($\geq 40$ inliers) e PnP sobre pontos 3D triangulados do keyframe candidato ($\geq 20$ inliers). Candidatos
+        só entre keyframes separados por $\geq 30$\,s e $\geq 100$ keyframes.
+\end{itemize}
+
+\subsection{Rejeição de laços falsos (três camadas)}
+\label{sec:rejeicao}
+O esquema segue o Kimera-RPGO~\cite{rosinol2020kimera}: um teste contra a odometria, depois PCM, e GNC no lote final.
+
+\paragraph{Porta de deriva.} Compara a pose relativa afirmada pelo laço com a pose relativa estimada pela odometria entre
+os dois nós. O laço é descartado se a diferença passar de
+\[
+  \Delta p > 15\,\text{m} + 0{,}10\,d, \qquad \Delta\theta > 0{,}35\,\text{rad} + 0{,}0005\,\text{rad/m}\cdot d,
+\]
+onde $d$ é o percurso entre os dois nós. É uma adaptação do teste de consistência com a odometria do
+Kimera-RPGO: no lugar da covariância da odometria (que subestima a própria deriva e faria o teste $\chi^2$ rejeitar
+laços verdadeiros) usa-se um limite proporcional ao percurso. Os 10\,\% cobrem com folga a pior deriva final medida da
+roda (8,6\,\%, urban30); os 15\,m absorvem laços curtos e o erro de escala local do VO. A sensibilidade a esses valores
+é medida na Seção~\ref{sec:porta}.
+
+\paragraph{PCM (\emph{Pairwise Consistency Maximization})~\cite{mangelson2018pcm}.} Para cada par de laços, compõe-se o
+ciclo laço~A $\to$ odometria $\to$ laço~B $\to$ odometria e testa-se se ele fecha (teste $\chi^2$ com 4 graus de
+liberdade a 99\,\%, limiar 13,28, com incerteza proporcional à distância). Entram no iSAM2 apenas os laços do maior
+conjunto mutuamente consistente (clique máximo), com pelo menos 2 laços: um laço isolado não entra online.
+
+\paragraph{GNC-TLS no lote final~\cite{yang2020gnc}.} Custo de mínimos quadrados truncados (TLS, limiar
+$\chi^2_6$ a 99\,\% $=16{,}81$) sobre todos os candidatos, resolvido por não convexidade graduada: cada laço recebe um
+peso que vai a 0 (rejeitado) ou 1 (aceito). Duas variantes:
+\begin{itemize}
+  \item \textbf{GNC novo} (padrão desde 2026-11-07): parte da solução só de odometria (sem laços) e só considera laços
+        com pelo menos um parceiro consistente no PCM.
+  \item \textbf{GNC antigo}: partia da estimativa online e considerava também laços isolados.
+\end{itemize}
+
+%=====================================================================================================================
+\section{Dados}
+\label{sec:dados}
+
+\subsection{KAIST Complex Urban~\cite{jeong2019kaist}}
+Carro em ambiente urbano denso (Coreia do Sul), câmera estéreo (usa-se só a esquerda, 1280$\times$560, 10\,Hz),
+encoders nas rodas traseiras e GT por fusão de RTK-GPS, IMU de fibra óptica e SLAM com LiDAR. Poucos datasets públicos
+têm câmera, encoder de roda e GT de qualidade ao mesmo tempo; esse é o motivo da escolha.
+
+\begin{table}[H]\centering\small
+\caption{Sequências do KAIST usadas. ``Revisitas'': amostras do GT a menos de 10\,m de um ponto já visitado depois de
+$\geq 200$\,m rodados, no mesmo sentido ($<30^\circ$) ou oposto ($>150^\circ$).}
+\label{tab:seqs}
+\begin{tabular}{llrll}
+\toprule
+Sequência & Grupo & Percurso & Revisitas & Observação \\
+\midrule
+urban26 & avaliação & 3,7 km & mesmo sentido & a mais curta \\
+urban27 & avaliação & 5,2 km & ambos & \\
+urban30 & avaliação & 5,3 km & mesmo sentido (poucas) & trânsito denso; VO tem dificuldade de reinicializar \\
+urban33 & avaliação & 7,4 km & \textbf{só sentido oposto} & também usada no treino do vocabulário \\
+urban38 & avaliação & 11,2 km & ambos & calibração própria (diferente de 25--34) \\
+urban39 & avaliação & 10,6 km & ambos & idem \\
+\midrule
+urban28 & teste cego & 11,2 km & ambos & mesmas ruas de urban38/39, outra sessão \\
+urban31 & teste cego & 11,3 km & nenhuma & VO perdido em 42--47\,\% dos frames \\
+urban32 & teste cego & 7,1 km & mesmo sentido & \\
+urban37 & teste cego & 8,1 km & nenhuma & $\sim$78\,km/h; VO perdido em 57\,\% dos frames \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Avaliação} são as sequências usadas para ajustar parâmetros durante o desenvolvimento. \textbf{Teste cego} são
+sequências que nunca foram usadas no ajuste nem no treino do vocabulário de palavras visuais (treinado com urban25, 33 e
+34). Ressalvas: urban28 é outra sessão nas mesmas ruas de urban38/39 (cega para o ajuste, não para o lugar), e urban33
+está tanto na avaliação quanto no treino do vocabulário.
+
+\subsection{Inomi (robô móvel)}
+Robô diferencial em ambiente interno, câmera monocular e pose de odometria do próprio robô. Das 10 gravações, só
+\cmd{dataset_16_16} e \cmd{dataset_16_16_n2} têm GT (percurso de $\sim$2,6\,m, sem revisitas). Servem para mostrar
+que o sistema roda em outra plataforma, não para medir precisão. O detector de laço e os laços falsos não rodam nelas.
+
+%=====================================================================================================================
+\section{Métricas}
+\label{sec:metricas}
+
+\begin{description}
+  \item[ATE] (\emph{Absolute Trajectory Error}): RMSE da posição depois de alinhar a trajetória ao GT, calculado com o
+    evo~\cite{grupp2017evo}. A fusão e a roda são métricas e se alinham por SE(3); o VO monocular puro e o ORB-SLAM3 não
+    têm escala e se alinham por Sim(3), o que lhes dá a escala do GT ``de graça''.
+  \item[RPE] (\emph{Relative Pose Error}) no protocolo do KITTI~\cite{geiger2012kitti}: erro de translação (\%) e de
+    rotação ($^\circ$/100\,m) em segmentos de 100, 200, \dots, 800\,m; reporta-se a mediana. Não é calculado na Inomi
+    (percurso menor que 100\,m).
+  \item[Deriva final] Erro de posição no último instante dividido pelo percurso (\%).
+  \item[Laços aceitos / errados] Um laço é ``errado'' se a distância medida entre as duas poses difere da distância no
+    GT em 5\,m ou mais. ``Grosseiro'' se o erro passa de 50\,m (lugar errado).
+  \item[Cobertura] (só ORB-SLAM3) fração do percurso do GT coberta pelo maior mapa.
+  \item[Médias] Ponderadas pelo comprimento do percurso, separadas para avaliação e teste cego.
+\end{description}
+
+\subsection{Não determinismo e repetições}
+O VO puro é determinístico (bit a bit idêntico entre execuções). O sistema completo \textbf{não} é: o grafo roda em
+outro processo, de forma assíncrona, e a escala estimada por ele realimenta o VO; pequenas diferenças de tempo mudam
+quando cada informação chega e a trajetória diverge. Por isso o sistema completo roda \textbf{3 vezes} por sequência e
+se reporta a mediana com o mínimo e o máximo. As demais configurações rodam uma vez, e uma diferença em relação ao
+sistema completo só é considerada efeito real se cair fora da faixa [mínimo, máximo] das 3 repetições.
+
+%=====================================================================================================================
+\section{Experimentos}
+\label{sec:experimentos}
+
+\subsection{Ablação}
+\label{sec:ablacao}
+Cada linha desliga um componente do sistema completo (Tabela~\ref{tab:configs}). ``Só roda'', ``só VO'' e ``fusão
+online'' não são execuções à parte: saem das trajetórias gravadas pelas execuções correspondentes.
+
+\begin{table}[H]\centering\small
+\caption{Configurações da ablação e o que cada uma altera (opções de \cmd{Codes/scripts/rodar_sistema.py}).}
+\label{tab:configs}
+\begin{tabularx}{\linewidth}{lX}
+\toprule
+Configuração & O que muda \\
+\midrule
+\cmd{completo} (3$\times$) & sistema inteiro (BA fixo, realimentação, âncora do chão, laço com as 3 camadas) \\
+\cmd{sem_laco} & \cmd{--no-loop}: sem fechamento de laço \\
+\cmd{sem_realimentacao} & \cmd{--no-feedback}: a escala do grafo não volta para o VO; fornece também o ``só VO, BA fixo'' \\
+\cmd{sem_chao} & \cmd{--vo use_ground_scale=False}: sem âncora de escala pelo plano do chão \\
+\cmd{ba_marg} & \cmd{--ba-mode marg}: BA local com marginalização \\
+\cmd{vo_marg} & \cmd{--no-feedback --ba-mode marg}: fornece o ``só VO, BA marginalizado'' \\
+\cmd{sem_porta} & porta de deriva desligada (limites $10^9$) \\
+\cmd{sem_pcm} & PCM desligado ($\chi^2=\infty$, clique mínimo 1) \\
+\cmd{sem_gnc} & sem GNC-TLS no lote final (LM só com os laços ativos do PCM) \\
+\cmd{sem_rejeicao} & as três camadas desligadas \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Detector de laço isolado}
+Mede o reconhecimento de lugar sem o grafo (\cmd{Codes/ferramentas/avaliar_lacos.py}). Keyframes a cada $\sim$2\,m;
+cada um consulta o banco de lugares. Reporta revocação no topo (R@1 e R@10) para revisitas no mesmo sentido e no oposto,
+precisão dos laços aceitos (lugar certo; pose certa) e cobertura das revisitas.
+
+\subsection{Laços de ponta a ponta}
+A partir dos laços que o detector entregou ao grafo em cada execução (\cmd{dados/lacos.csv}), conta em que camada cada
+laço parou (porta, PCM/GNC) ou se foi aceito, e quantos dos aceitos estavam errados
+(\cmd{Codes/ferramentas/lacos_ponta_a_ponta.py}). Responde ``o que as camadas fazem com laços reais''.
+
+\subsection{Robustez a laços falsos}
+\label{sec:falsos}
+Repete só o back-end (o grafo) a partir das mensagens gravadas da execução \cmd{completo_r1}
+(\cmd{FUSION_RECORD}), injetando laços que certamente estão errados (\cmd{Codes/ferramentas/lacos_falsos.py}):
+\begin{itemize}
+  \item o nó novo $b$ é o nó atual no instante da injeção; o nó antigo $a$ está $\geq 60$\,s antes e, no GT, a mais de
+        50\,m de $b$;
+  \item a medida afirmada imita um laço verdadeiro típico: $b$ de 0 a 8\,m à frente de $a$, $\sim$1\,m de lado, guinada
+        $\sim\mathcal{N}(0, 3^\circ)$;
+  \item \textbf{aleatórios}: $N$ laços independentes espalhados no percurso; \textbf{em grupos de 5}: $N/5$ grupos de 5
+        laços mutuamente consistentes (uma rua inteira confundida com outra), o caso adversário do PCM;
+  \item $N \in \{0, 10, 50, 100\}$, 2 sementes, as mesmas injeções em todas as configurações (completo, sem porta, sem
+        PCM, sem GNC, sem nenhuma rejeição, GNC antigo).
+\end{itemize}
+Limitação: o replay não realimenta o VO com o grafo perturbado; mede só o efeito no grafo.
+
+\subsection{Sensibilidade a erros dos sensores}
+Sistema completo nas 6 sequências de avaliação com perturbações deliberadas da calibração (opções
+\cmd{--enc-escala}, \cmd{--altura-delta}, \cmd{--atraso-roda}): diâmetro das rodas $\pm2$\,\%, altura da câmera
+$\pm5$\,cm e atraso roda-câmera $\pm50$\,ms. Uma execução por perturbação, comparada com a faixa das 3 repetições sem
+perturbação.
+
+\subsection{Sensibilidade da porta de deriva}
+\label{sec:porta}
+Mesmo replay dos laços falsos, com a porta em cinco versões: padrão (15\,m + 10\,\%), 15\,m + 5\,\%, 15\,m + 20\,\%,
+5\,m + 10\,\% e 30\,m + 10\,\%; $N \in \{0, 10, 50\}$, 2 modos, 2 sementes, nas 8 sequências com revisita. O caso
+$N=0$ mostra o custo de apertar a porta (laços reais barrados); $N>0$ mostra o benefício.
+
+\subsection{Comparação com o ORB-SLAM3 monocular}
+\label{sec:orb}
+ORB-SLAM3~\cite{campos2021orbslam3} compilado localmente (\cmd{~/sota}, sem viewer), com 2000 ORB por frame e a mesma
+calibração de câmera do nosso VO (\cmd{Codes/ferramentas/orbslam3_kaist.py}). Quando o rastreamento se perde, ele cria
+um mapa novo, desconexo e com outra escala; o protocolo usual é avaliar o \textbf{maior mapa}. Por isso reporta-se
+sempre o ATE (Sim(3)) \textbf{junto com a cobertura}, e o nosso VO puro, o sistema completo e a roda são avaliados
+\textbf{no mesmo trecho}. O ORB-SLAM3 também não é determinístico: 3 execuções por sequência.
+
+%=====================================================================================================================
+\section{Execução}
+\label{sec:execucao}
+
+\subsection{Orquestrador}
+\cmd{Codes/ferramentas/bateria.py} monta a lista de tarefas (sequência $\times$ configuração) e as executa em ordem de
+prioridade, 2 de cada vez (tarefas de replay e o ORB-SLAM3 ocupam as 2 vagas). É \textbf{retomável}: uma tarefa conta
+como feita quando o arquivo final existe (\cmd{dados/metricas.csv} ou um marcador \cmd{.feito}); uma execução
+interrompida é apagada e refeita. Uma trava (\cmd{fcntl}) impede duas baterias simultâneas.
+
+\begin{table}[H]\centering\small
+\caption{Fases, em ordem de prioridade.}
+\begin{tabularx}{\linewidth}{rlX}
+\toprule
+& Fase & Tarefas \\
+\midrule
+1 & sistema completo & \cmd{completo_r1} (grava também o \cmd{.rec} do grafo para o replay) \\
+2 & laço e realimentação & \cmd{sem_laco}, \cmd{sem_realimentacao}, GIFs \\
+3 & repetições & \cmd{completo_r2}, \cmd{completo_r3} \\
+4 & componentes & \cmd{sem_chao}, \cmd{ba_marg}, \cmd{vo_marg} \\
+5 & camadas de rejeição & \cmd{sem_porta}, \cmd{sem_pcm}, \cmd{sem_gnc}, \cmd{sem_rejeicao} \\
+6 & detector isolado & \cmd{detector} (só KAIST) \\
+7 & laços falsos & \cmd{lacos_falsos} (só KAIST) \\
+8 & estado da arte & \cmd{orbslam3_r1} (só KAIST) \\
+9 & porta de deriva & \cmd{porta_deriva} (8 sequências com revisita) \\
+10 & sensibilidade & \cmd{sens_*} (6 de avaliação) \\
+11 & repetições do ORB-SLAM3 & \cmd{orbslam3_r2}, \cmd{orbslam3_r3} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Agendamento}
+Um \emph{timer} do systemd de usuário (\cmd{bateria-dissert.timer}) dispara a bateria todo dia às 21:00; ela não
+inicia tarefas novas depois das 09:30 e continua na noite seguinte de onde parou. No fim de cada noite roda a síntese
+(tabelas e figuras) e regenera o índice \cmd{resultados/README.md}. O computador precisa ficar ligado com a sessão aberta.
+
+\subsection{Organização dos resultados}
+\begin{itemize}
+  \item \cmd{resultados/kaist/<seq>/<config>/}: cada execução (figuras \cmd{fusao_*.pdf}, \cmd{dados/} com
+        trajetórias, laços, tempos e métricas, \cmd{evo/}); GIFs em \cmd{completo_r1/gifs/};
+  \item \cmd{resultados/inomi/<seq>/<config>/}: idem;
+  \item \cmd{resultados/sintese/}: \cmd{ablacao/}, \cmd{inomi/}, \cmd{detector_lacos/}, \cmd{lacos_falsos/},
+        \cmd{lacos_ponta_a_ponta/}, \cmd{sensibilidade/}, \cmd{porta_deriva/}, \cmd{orbslam3/} e o resumo
+        \cmd{RESUMO.md};
+  \item \cmd{resultados/bateria/}: log e estado;
+  \item \cmd{resultados/testes_unitarios/}: histórico dos testes unitários (51 testes, todos passando).
+\end{itemize}
+
+%=====================================================================================================================
+\section{Resultados até a data}
+\label{sec:resultados}
+
+Estado em 9/11/2026: ablação, repetições, sensibilidade a sensores, laços de ponta a ponta e Inomi completos;
+detector em 9 de 10 sequências; laços falsos em 7 de 10 (as que faltam não têm revisita no mesmo sentido); porta de
+deriva ainda não rodada; ORB-SLAM3 em andamento.
+
+\subsection{Ablação}
+A Tabela~\ref{tab:ablacao} (página em paisagem a seguir) traz o ATE de cada configuração em cada sequência.
+
+\begin{landscape}
+\begin{table}[p]\centering
+\caption{ATE [m] por sequência (mediana das repetições; $\dagger$ = teste cego; médias ponderadas pelo percurso).
+Gerada pela bateria.}
+\label{tab:ablacao}
+\tabelagerada{\sint/ablacao/ablacao_ate.tex}{\linewidth}
+\end{table}
+\end{landscape}
+
+\begin{itemize}
+  \item \textbf{O sistema completo reduz o ATE em 85\,\% em relação à roda} nas sequências de avaliação
+        (134,8 $\to$ 19,8\,m em média ponderada) e em 91\,\% em relação ao VO puro. No teste cego, 67\,\%
+        (197,5 $\to$ 65,0\,m). O RPE de translação cai de 2,4\,\% para 1,3\,\%.
+  \item \textbf{O fechamento de laço é o fator dominante}: sem ele, 99,2\,m. A fusão sozinha (online) já fica em
+        48,6\,m, sobretudo por corrigir a deriva de rumo da roda (urban38: 241 $\to$ 50\,m).
+  \item \textbf{Realimentação, âncora do chão, BA marginalizado e camadas de rejeição não mudam o ATE de forma
+        mensurável}: as diferenças ficam dentro da variação entre execuções (só urban38 varia de 12,9 a 38,7\,m).
+        Exceção: sem a âncora do chão, caem os laços aceitos (152 $\to$ 136; cego 96 $\to$ 50) e sobem os errados
+        (0 $\to$ 7; 1 $\to$ 3).
+  \item \textbf{Teste cego}: funciona quando há revisita no mesmo sentido e o VO rastreia (urban28: 293 $\to$ 8,0\,m;
+        urban32: 36,9 $\to$ 12,7\,m). Sem revisita, o ganho vem só da fusão (urban31: 244 $\to$ 101\,m) ou não existe
+        (urban37, VO perdido em 57\,\% dos frames: igual à roda, sem divergir).
+  \item \textbf{urban33 não tem ganho} (41\,m $\approx$ roda 38\,m) porque todas as revisitas são em sentido oposto,
+        que a câmera frontal não reconhece~\cite{lowry2016survey,garg2018lost}.
+\end{itemize}
+
+\begin{figure}[H]\centering
+\figurase{\sint/ablacao/repeticoes.png}{0.9\linewidth}
+\caption{Variação entre as 3 execuções do sistema completo (fusão suavizada e online).}
+\end{figure}
+
+\paragraph{Por que as execuções variam.} Em urban38, o último laço acontece no km 10,2 de 11,2: o último quilômetro
+roda sem correção e amplia a diferença entre execuções, que perdem o VO em pontos diferentes entre os km 3 e 6. Em
+urban31, sem laço, o resultado é tão variável quanto o VO.
+
+\subsection{Laços de ponta a ponta}
+\begin{table}[H]\centering
+\caption{Laços entregues pelo detector ao grafo no sistema completo (3 execuções $\times$ 10 sequências). Gerada pela bateria.}
+\tabelagerada{\sint/lacos_ponta_a_ponta/tabela_completo.tex}{\linewidth}
+\end{table}
+Dos 789 laços entregues, 22 eram ruins ($\geq 5$\,m) e 4 grosseiros ($>50$\,m). \textbf{Nenhum grosseiro entrou}
+(3 barrados pela porta, 1 pelo GNC). Entre os 754 aceitos, 5 ruins, com erro máximo de 11,5\,m (lugar certo visto de
+longe). Custo: 18 laços bons barrados (2,3\,\%).
+
+\subsection{Detector de laço isolado}
+\begin{table}[H]\centering\small
+\caption{Detector sem o grafo (sequências com revisita; urban32 pendente).}
+\begin{tabular}{lrrrrrr}
+\toprule
+Seq. & Revisitas (mesmo/oposto) & R@1 mesmo & Aceitos & Precisão (lugar) & Precisão (pose) & Cobertura \\
+\midrule
+urban26 & 145 / 0 & 0,57 & 4 & 1,00 & 1,00 & 49\,\% \\
+urban27 & 236 / 134 & 0,64 & 15 & 0,93 & 0,93 & 92\,\% \\
+urban28$\dagger$ & 1114 / 595 & 0,73 & 77 & 0,91 & 0,87 & 84\,\% \\
+urban30 & 121 / 0 & 0,31 & 6 & 1,00 & 0,83 & 92\,\% \\
+urban38 & 1124 / 586 & 0,65 & 82 & 0,89 & 0,83 & 81\,\% \\
+urban39 & 918 / 571 & 0,56 & 49 & 0,92 & 0,80 & 74\,\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+Em revisitas de sentido oposto, R@1 $\approx 0$ em todas as sequências.
+
+\subsection{Robustez a laços falsos}
+\begin{table}[H]\centering\small
+\caption{Laços falsos em 7 sequências (84 execuções por configuração, 4440 laços falsos injetados).}
+\label{tab:falsos}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrrr}
+\toprule
+Configuração & Barrados pela porta & Falsos aceitos (execuções) & Reais mantidos & ATE mediano & Pior ATE \\
+\midrule
+\textbf{Sistema completo} & 4040 (91\,\%) & \textbf{28 (8)} & 87\,\% & \textbf{12,9\,m} & 365\,m \\
+sem porta & 0 & 33 (8) & 74\,\% & 36,6\,m & 318\,m \\
+sem PCM & 4021 & 32 (10) & 80\,\% & 14,6\,m & 328\,m \\
+sem GNC-TLS & 4040 & 82 (27) & 91\,\% & 13,4\,m & 563\,m \\
+\textbf{sem nenhuma rejeição} & 0 & \textbf{4080 (78)} & 96\,\% & \textbf{506\,m} & 775\,m \\
+GNC antigo & 4040 & 27 (9) & 92\,\% & 12,6\,m & 377\,m \\
+\bottomrule
+\end{tabular}}
+\end{table}
+\begin{itemize}
+  \item Sem rejeição, o sistema aceita 92\,\% dos laços falsos e o ATE mediano vai a 506\,m. Com as três camadas,
+        0,6\,\% entram e o ATE mediano fica no valor sem injeção.
+  \item A porta barra 91\,\%; o GNC pega a maior parte do resto (sem ele, aceitos 28 $\to$ 82); o PCM protege os laços
+        reais (80 $\to$ 87\,\% mantidos).
+  \item \textbf{GNC novo $\times$ antigo: empate} (execução a execução, pior em 7 e melhor em 8 de 84). O novo tem um
+        modo de falha próprio, em investigação: em urban39 rejeitou todos os 54 laços reais (ATE 109\,m).
+  \item O pior caso é igual nas duas versões: urban33, 100 laços em grupos ($\sim$370\,m). Sem nenhum laço real
+        (revisitas só em sentido oposto), grupos consistentes de laços falsos não têm com o que competir.
+\end{itemize}
+\begin{figure}[H]\centering
+\figurase{\sint/lacos_falsos/lacos_falsos_ate.png}{0.95\linewidth}
+\caption{ATE da fusão suavizada em função do número de laços falsos, por configuração.}
+\end{figure}
+
+\subsection{Sensibilidade a erros dos sensores}
+\begin{table}[H]\centering
+\caption{ATE [m] com cada perturbação ($^*$ = fora da faixa das 3 execuções sem perturbação). Gerada pela bateria.}
+\tabelagerada{\sint/sensibilidade/sensibilidade.tex}{\linewidth}
+\end{table}
+O erro de escala do encoder é o que pesa: com +2\,\%, o ATE piora claramente em 4 das 6 sequências (mediana +47\,\%),
+porque a roda é a única fonte de escala métrica. Altura $\pm5$\,cm e atraso $\pm50$\,ms ficam dentro da variação normal
+(exceção a repetir: urban38 com +5\,cm, 162\,m numa execução). Cautela: com 3 execuções de referência e 1 por
+perturbação, a marca ``fora da faixa'' aparece com frequência sem efeito real.
+
+\subsection{Comparação com o ORB-SLAM3}
+\begin{table}[H]\centering\small
+\caption{ATE [m] no trecho coberto pelo maior mapa do ORB-SLAM3 (r1; demais sequências em andamento).}
+\begin{tabular}{lrrrrr}
+\toprule
+Seq. & Cobertura (mapas) & ORB-SLAM3 (Sim(3)) & Nosso VO puro (Sim(3)) & \textbf{Nosso sistema} (SE(3)) & Só roda \\
+\midrule
+urban26 & 32\,\% (5) & 10,4 & 11,7 & \textbf{2,3} & 3,9 \\
+urban27 & 100\,\% (1) & 17,1 & 93,2 & \textbf{12,5} & 91,5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\begin{itemize}
+  \item Quando não se perde, o VO do ORB-SLAM3 é bem melhor que o nosso VO puro (17 contra 93\,m na urban27): reusa o
+        mapa e tem BA local maior. A dissertação não deve afirmar que o nosso VO supera o estado da arte.
+  \item O sistema completo ainda é melhor nas duas, por três motivos que o ORB-SLAM3 monocular não tem: escala métrica
+        sem o GT (o Sim(3) dá ao ORB-SLAM3 a escala do GT), continuidade quando o VO cai (na urban26 o ORB-SLAM3 se
+        partiu em 5 mapas) e fechamento de laço funcionando (o ORB-SLAM3 não fechou nenhum na urban27).
+\end{itemize}
+\begin{figure}[H]\centering
+\figurase{../resultados/kaist/urban27/orbslam3_r1/comparacao_orbslam3.png}{\linewidth}
+\caption{urban27: trajetórias no trecho do maior mapa do ORB-SLAM3 e erro ao longo do trecho.}
+\end{figure}
+
+\subsection{Inomi}
+Num percurso de 2,6\,m sem laço, todas as configurações ficam entre 2 e 4\,cm (sistema completo: 3,7 e 1,8\,cm;
+roda: 3,7 e 1,9\,cm). A fusão segue a roda, em que o grafo confia mais.
+
+%=====================================================================================================================
+\section{Limitações e pendências}
+\begin{itemize}
+  \item Revisitas em sentido oposto não são reconhecidas (câmera frontal): limitação do sensor; trabalhos futuros com
+        descritores invariantes ao ponto de vista, câmera traseira ou LiDAR (Scan Context).
+  \item O VO perde o rastreamento em alta velocidade (urban37) e trânsito denso (urban31, urban30).
+  \item O sistema completo não é determinístico; todo resultado do sistema completo deve ser lido como mediana com faixa.
+  \item O replay dos laços falsos não realimenta o VO.
+  \item Pendentes na bateria: detector em urban32, laços falsos em urban31/32/37, porta de deriva, ORB-SLAM3 nas 10
+        sequências com 3 repetições.
+  \item Pendentes fora da bateria: investigar o modo de falha do GNC novo; repetir urban38 com altura +5\,cm; novos
+        conjuntos com o robô da plataforma SLAM-Teaching (importador e calibrador prontos).
+\end{itemize}
+
+%=====================================================================================================================
+\section{Reprodução}
+\begin{verbatim}
+# estado e log
+python3 Codes/ferramentas/bateria.py --estado
+tail -f resultados/bateria/bateria.log
+# rodar o que falta agora (sem limite de horário) / só a síntese
+python3 Codes/ferramentas/bateria.py --sem-limite
+python3 Codes/ferramentas/bateria.py --sintese
+# uma tarefa isolada
+python3 Codes/ferramentas/bateria.py --seqs urban32 --configs detector --sem-limite
+# testes unitários
+python3 Codes/tests/rodar_testes.py
+# este documento
+cd documentos && latexmk -pdf bateria_de_testes.tex
+\end{verbatim}
+
+%=====================================================================================================================
+\begin{thebibliography}{99}\small
+\bibitem{campos2021orbslam3} C. Campos, R. Elvira, J. J. G. Rodríguez, J. M. M. Montiel, J. D. Tardós.
+  ORB-SLAM3: An Accurate Open-Source Library for Visual, Visual--Inertial and Multi-Map SLAM. \emph{IEEE T-RO}, 2021.
+\bibitem{galvez2012dbow} D. Gálvez-López, J. D. Tardós. Bags of Binary Words for Fast Place Recognition in Image
+  Sequences. \emph{IEEE T-RO}, 2012.
+\bibitem{garg2018lost} S. Garg, N. Suenderhauf, M. Milford. LoST? Appearance-Invariant Place Recognition for Opposite
+  Viewpoints using Visual Semantics. \emph{RSS}, 2018.
+\bibitem{geiger2012kitti} A. Geiger, P. Lenz, R. Urtasun. Are we ready for Autonomous Driving? The KITTI Vision
+  Benchmark Suite. \emph{CVPR}, 2012.
+\bibitem{grupp2017evo} M. Grupp. evo: Python package for the evaluation of odometry and SLAM.
+  \url{https://github.com/MichaelGrupp/evo}, 2017.
+\bibitem{jeong2019kaist} J. Jeong, Y. Cho, Y.-S. Shin, H. Roh, A. Kim. Complex Urban Dataset with Multi-level Sensors
+  from Highly Diverse Urban Environments. \emph{IJRR}, 2019.
+\bibitem{lowry2016survey} S. Lowry et al. Visual Place Recognition: A Survey. \emph{IEEE T-RO}, 2016.
+\bibitem{mangelson2018pcm} J. G. Mangelson, D. Dominic, R. M. Eustice, R. Vasudevan. Pairwise Consistent Measurement
+  Set Maximization for Robust Multi-Robot Map Merging. \emph{ICRA}, 2018.
+\bibitem{qin2018vins} T. Qin, P. Li, S. Shen. VINS-Mono: A Robust and Versatile Monocular Visual-Inertial State
+  Estimator. \emph{IEEE T-RO}, 2018.
+\bibitem{rosinol2020kimera} A. Rosinol, M. Abate, Y. Chang, L. Carlone. Kimera: an Open-Source Library for Real-Time
+  Metric-Semantic Localization and Mapping. \emph{ICRA}, 2020.
+\bibitem{yang2020gnc} H. Yang, P. Antonante, V. Tzoumas, L. Carlone. Graduated Non-Convexity for Robust Spatial
+  Perception: From Non-Minimal Solvers to Global Outlier Rejection. \emph{IEEE RA-L}, 2020.
+\end{thebibliography}
+
+\end{document}
