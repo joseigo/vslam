@@ -80,10 +80,13 @@ FASES = [                                       # (nome, [configurações]) -- e
     ("detector de laço (isolado)", ["detector"]),
     ("laços falsos (replay do grafo)", ["lacos_falsos"]),
     ("ORB-SLAM3 monocular (estado da arte)", ["orbslam3_r1"]),
+    ("sensibilidade da porta de deriva (replay)", ["porta_deriva"]),
     ("sensibilidade a erros dos sensores", SENS),
     ("repetições do ORB-SLAM3", ["orbslam3_r2", "orbslam3_r3"]),
 ]
 ORB_CFGS = ("orbslam3_r1", "orbslam3_r2", "orbslam3_r3")
+REPLAY = ("lacos_falsos", "porta_deriva")                       # replay do grafo gravado (completo_r1.rec)
+PORTA_SEQS = ["urban26", "urban27", "urban28", "urban30", "urban32", "urban33", "urban38", "urban39"]  # com revisita
 
 
 def orbslam3_disponivel():
@@ -120,7 +123,7 @@ class Job:
     def __init__(self, fase, seq, cfg):
         self.fase, self.seq, self.cfg = fase, seq, cfg
         self.base = os.path.join(RES, group(seq), seq)
-        self.weight = 2 if cfg == "lacos_falsos" or cfg in ORB_CFGS else 1   # usam 2+ processos/threads
+        self.weight = 2 if cfg in REPLAY or cfg in ORB_CFGS else 1   # usam 2+ processos/threads
 
     @property
     def name(self):
@@ -132,12 +135,12 @@ class Job:
             return os.path.join(self.base, "completo_r1", "gifs")
         if self.cfg == "detector":
             return os.path.join(RES, "sintese", "detector_lacos", self.seq)
-        if self.cfg == "lacos_falsos":
-            return os.path.join(RES, "sintese", "lacos_falsos", self.seq)
+        if self.cfg in REPLAY:
+            return os.path.join(RES, "sintese", self.cfg, self.seq)
         return os.path.join(self.base, self.cfg)
 
     def done(self):
-        if self.cfg in ("gifs", "detector", "lacos_falsos") or self.cfg in ORB_CFGS:
+        if self.cfg in ("gifs", "detector") or self.cfg in REPLAY or self.cfg in ORB_CFGS:
             return os.path.isfile(os.path.join(self.out, ".feito"))
         return os.path.isfile(os.path.join(self.out, "dados", "metricas.csv"))
 
@@ -149,7 +152,7 @@ class Job:
         if self.cfg in ORB_CFGS:                               # avalia no mesmo trecho que o nosso VO/sistema
             return all(os.path.isfile(os.path.join(self.base, c, "dados", "metricas.csv"))
                        for c in ("completo_r1", "sem_realimentacao"))
-        if self.cfg == "lacos_falsos":
+        if self.cfg in REPLAY:
             return os.path.isfile(os.path.join(self.base, "completo_r1.rec")) and \
                 os.path.isfile(os.path.join(r1, "dados", "metricas.csv"))
         return True
@@ -164,6 +167,11 @@ class Job:
         if self.cfg == "lacos_falsos":
             return [PY, os.path.join(HERE, "lacos_falsos.py"), "--rec", os.path.join(self.base, "completo_r1.rec"),
                     "--images", img, "--dataset", self.seq, "--out", self.out, "--sementes", "2", "-j", "2"], env
+        if self.cfg == "porta_deriva":                         # mesma injeção, porta mais apertada / mais larga
+            return [PY, os.path.join(HERE, "lacos_falsos.py"), "--rec", os.path.join(self.base, "completo_r1.rec"),
+                    "--images", img, "--dataset", self.seq, "--out", self.out, "--sementes", "2", "-j", "2",
+                    "--n", "0", "10", "50", "--configs", "completo", "porta_5pct", "porta_20pct", "porta_min5",
+                    "porta_min30"], env
         if self.cfg in ORB_CFGS:
             return [PY, os.path.join(HERE, "orbslam3_kaist.py"), "rodar", "--images", img, "--out", self.out], env
         cfg = self.cfg.split("_r")[0] if self.cfg.startswith("completo_r") else self.cfg
@@ -179,7 +187,7 @@ class Job:
             shutil.rmtree(self.out)
 
     def finish(self, rc):
-        if rc == 0 and self.cfg in ("gifs", "detector", "lacos_falsos") and os.path.isdir(self.out):
+        if rc == 0 and (self.cfg in ("gifs", "detector") or self.cfg in REPLAY) and os.path.isdir(self.out):
             open(os.path.join(self.out, ".feito"), "w").write(dt.datetime.now().isoformat())
 
 
@@ -191,6 +199,8 @@ def jobs():
     for fase, cfgs in FASES:
         for cfg in cfgs:
             for seq in all_seqs():
+                if cfg == "porta_deriva" and seq not in PORTA_SEQS:
+                    continue
                 if seq.startswith("dataset") and cfg in ("detector", "lacos_falsos"):
                     continue                                     # Inomi: 2,6 m, sem revisitas
                 if cfg in ORB_CFGS and (seq.startswith("dataset") or not orbslam3_disponivel()):
@@ -272,7 +282,7 @@ def run(args):
                 log(f"PULADA {j.name}: imagens não encontradas")
                 continue
             j.prepare()
-            log_path = os.path.join(j.base, f"{j.cfg}.log") if j.cfg not in ("detector", "lacos_falsos") \
+            log_path = os.path.join(j.base, f"{j.cfg}.log") if j.cfg not in ("detector",) + REPLAY \
                 else os.path.join(os.path.dirname(j.out), f"{j.seq}.log")
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
             fh = open(log_path, "w")
@@ -324,6 +334,10 @@ def sintese():
         _sh([PY, os.path.join(HERE, "lacos_falsos.py"), "--resumo", os.path.join(S, "lacos_falsos")],
             "sintese_lacos_falsos.txt")
         shutil.copy(os.path.join(LOG_DIR, "sintese_lacos_falsos.txt"), os.path.join(S, "lacos_falsos", "tabela.txt"))
+    if glob.glob(os.path.join(S, "porta_deriva", "*", ".feito")):
+        _sh([PY, os.path.join(HERE, "lacos_falsos.py"), "--resumo", os.path.join(S, "porta_deriva")],
+            "sintese_porta_deriva.txt")
+        shutil.copy(os.path.join(LOG_DIR, "sintese_porta_deriva.txt"), os.path.join(S, "porta_deriva", "tabela.txt"))
     indice()
     log("síntese concluída")
 

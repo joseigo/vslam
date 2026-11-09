@@ -49,10 +49,18 @@ CONFIGS = {
                          loop_gnc=False),
     # GNC como era até 2026-11-07: partia da estimativa online e considerava também laços isolados
     "gnc_antigo": dict(loop_gnc_init="online", loop_gnc_pcm=False),
+    # sensibilidade da porta de deriva (padrão: 15 m + 10% do percurso)
+    "porta_5pct": dict(loop_gate_frac=0.05),
+    "porta_20pct": dict(loop_gate_frac=0.20),
+    "porta_min5": dict(loop_gate_min=5.0),
+    "porta_min30": dict(loop_gate_min=30.0),
 }
+CONFIGS_PADRAO = ["completo", "sem_porta", "sem_pcm", "sem_gnc", "sem_rejeicao", "gnc_antigo"]
 LABELS = {"completo": "sistema completo", "sem_porta": "sem porta de deriva", "sem_pcm": "sem PCM",
           "sem_gnc": "sem GNC-TLS", "sem_rejeicao": "sem nenhuma rejeição",
-          "gnc_antigo": "GNC antigo (da estimativa online, laços isolados)"}
+          "gnc_antigo": "GNC antigo (da estimativa online, laços isolados)",
+          "porta_5pct": "porta 15 m + 5% do percurso", "porta_20pct": "porta 15 m + 20% do percurso",
+          "porta_min5": "porta 5 m + 10% do percurso", "porta_min30": "porta 30 m + 10% do percurso"}
 MODES_SHORT = {"aleatorio": "laços falsos aleatórios", "grupo": "laços falsos em grupos de 5"}
 MODES = {"aleatorio": "aleatórios (independentes)", "grupo": "em grupos de 5 (mutuamente consistentes)"}
 MIN_DT = 60.0          # s entre a e b
@@ -271,8 +279,9 @@ def main_resumo(pasta):
 
     # ---- figura 1: ATE x nº de laços falsos (small multiples: modo x sequência)
     TEXT, GRID = "#52514e", "#e4e3df"
-    COL = dict(zip(CONFIGS, ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#6250d6"]))
-    MARK = dict(zip(CONFIGS, "osD^vP"))
+    COL = dict(zip(CONFIGS, ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#6250d6",
+                             "#0f8a8a", "#b8860b", "#8c564b", "#7f7f7f"]))
+    MARK = dict(zip(CONFIGS, "osD^vPXhp*"))
     plt.rcParams.update({
         "font.size": 9, "axes.titlesize": 9.5, "axes.labelsize": 9, "legend.fontsize": 8.5, "xtick.labelsize": 8.5,
         "ytick.labelsize": 8.5, "axes.edgecolor": "#8a8984", "axes.labelcolor": TEXT, "xtick.color": TEXT,
@@ -377,7 +386,7 @@ if __name__ == "__main__":
     ap.add_argument("--out")
     ap.add_argument("--n", type=int, nargs="+", default=[0, 10, 50, 100])
     ap.add_argument("--modos", nargs="+", default=list(MODES), choices=list(MODES))
-    ap.add_argument("--configs", nargs="+", default=list(CONFIGS), choices=list(CONFIGS))
+    ap.add_argument("--configs", nargs="+", default=CONFIGS_PADRAO, choices=list(CONFIGS))
     ap.add_argument("--sementes", type=int, default=3)
     ap.add_argument("--gt", help="global_pose.csv (alternativa a --images)")
     ap.add_argument("-j", "--jobs", type=int, default=2)
