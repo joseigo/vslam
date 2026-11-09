@@ -57,7 +57,13 @@ def dataset_dirs(images):
     return d, os.path.basename(d)
 
 
-def load_calib(root):
+def load_calib(root, max_up=4):
+    d = os.path.abspath(root)                    # calibration/ pode ficar acima do GT (urban32: urban32/urban32/urban32)
+    for _ in range(max_up):
+        if os.path.isfile(os.path.join(d, "calibration", "left.yaml")):
+            break
+        d = os.path.dirname(d)
+    root = d
     fs = cv2.FileStorage(os.path.join(root, "calibration", "left.yaml"), cv2.FILE_STORAGE_READ)
     K, dist = fs.getNode("camera_matrix").mat().astype(np.float64), fs.getNode("distortion_coefficients").mat()
     fs.release()
