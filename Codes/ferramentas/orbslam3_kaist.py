@@ -213,7 +213,19 @@ def rodar(a):
                              stdout=log, stderr=subprocess.STDOUT, cwd=a.out, env=env)
     print(f"ORB-SLAM3 terminou (rc={rc}) em {(time.time() - t0) / 60:.1f} min")
     if rc != 0 and not os.path.isfile(os.path.join(a.out, "orb_frames.txt")):
-        raise SystemExit(rc)
+        # O ORB-SLAM3 monocular às vezes ABORTA (NaN na otimização -> "SO3::exp failed" do Sophus, rc=-6) antes de
+        # salvar a trajetória. Isso é uma falha do método: fica registrada como resultado (não é repetida).
+        n_img = len(glob.glob(os.path.join(a.images, "*.png")))
+        t_f = os.path.join(a.out, "orb_tempos.txt")
+        n_proc = sum(1 for _ in open(t_f)) if os.path.isfile(t_f) else 0
+        motivo = "SO3::exp (NaN)" if "SO3::exp failed" in open(os.path.join(a.out, "orbslam3.log"),
+                                                                errors="ignore").read() else f"rc={rc}"
+        pd.DataFrame([dict(metodo="ORB-SLAM3 mono (maior mapa)", ate_m=np.nan, cobertura_pct=0.0, abortou=1,
+                           motivo=motivo, frames_processados_pct=100 * n_proc / max(n_img, 1))]).to_csv(
+            os.path.join(a.out, "metricas.csv"), index=False)
+        print(f"ABORTOU ({motivo}) com {100 * n_proc / max(n_img, 1):.0f}% dos frames processados -> registrado")
+        open(os.path.join(a.out, ".feito"), "w").close()
+        return
     seq_dir = a.seq_dir or os.path.dirname(os.path.abspath(a.out))
     avaliar(a.out, seq_dir)
     open(os.path.join(a.out, ".feito"), "w").close()
@@ -230,15 +242,24 @@ def resumo(a):
         print("nenhuma execução do ORB-SLAM3")
         return
     D = pd.concat(rows, ignore_index=True)
+    if "abortou" not in D:
+        D["abortou"] = 0
+    D["abortou"] = D["abortou"].fillna(0)
     os.makedirs(a.out, exist_ok=True)
     D.to_csv(os.path.join(a.out, "orbslam3.csv"), index=False)
+    ab = D[D.abortou == 1].groupby("seq").size()
+    nexec = D[D.metodo.str.startswith("ORB")].groupby("seq").execucao.nunique()
+    D = D[D.abortou != 1]
     M = D.groupby(["seq", "metodo"], sort=False).agg(ate_med=("ate_m", "median"), ate_min=("ate_m", "min"),
                                                      ate_max=("ate_m", "max"), cob=("cobertura_pct", "median"),
                                                      n=("ate_m", "size")).reset_index()
     txt = ["ORB-SLAM3 monocular x nosso sistema (ATE [m], mediana [mín-máx] das execuções; cobertura = % do "
            "percurso do GT no maior mapa do ORB-SLAM3; nossos métodos avaliados no MESMO trecho)", ""]
-    for seq, g in M.groupby("seq", sort=False):
-        txt.append(seq)
+    txt.append("(abortou = o ORB-SLAM3 parou com erro interno antes de salvar a trajetória; conta como falha)")
+    txt.append("")
+    for seq in nexec.index:
+        g = M[M.seq == seq]
+        txt.append(f"{seq}: {nexec[seq]} execuções, {int(ab.get(seq, 0))} abortaram")
         for _, r in g.iterrows():
             faixa = f" [{r.ate_min:.1f}-{r.ate_max:.1f}]" if r.n > 1 else ""
             txt.append(f"   {r.metodo:42s} {r.ate_med:8.1f}{faixa:16s} cobertura {r.cob:5.1f}%")
