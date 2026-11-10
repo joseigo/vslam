@@ -311,9 +311,8 @@ inicia tarefas novas depois das 09:30 e continua na noite seguinte de onde parou
 \section{Resultados até a data}
 \label{sec:resultados}
 
-Estado em 9/11/2026: ablação, repetições, sensibilidade a sensores, laços de ponta a ponta e Inomi completos;
-detector em 9 de 10 sequências; laços falsos em 7 de 10 (as que faltam não têm revisita no mesmo sentido); porta de
-deriva ainda não rodada; ORB-SLAM3 em andamento.
+Estado em 10/11/2026: bateria concluída (250 tarefas). Das 30 execuções do ORB-SLAM3, 4 abortaram com erro interno
+do próprio ORB-SLAM3 (\cmd{SO3::exp failed: NaN}) e contam como falha do método.
 
 \subsection{Ablação}
 A Tabela~\ref{tab:ablacao} (página em paisagem a seguir) traz o ATE de cada configuração em cada sequência.
@@ -364,7 +363,7 @@ longe). Custo: 18 laços bons barrados (2,3\,\%).
 
 \subsection{Detector de laço isolado}
 \begin{table}[H]\centering\small
-\caption{Detector sem o grafo (sequências com revisita; urban32 pendente).}
+\caption{Detector sem o grafo (sequências com revisita no mesmo sentido).}
 \begin{tabular}{lrrrrrr}
 \toprule
 Seq. & Revisitas (mesmo/oposto) & R@1 mesmo & Aceitos & Precisão (lugar) & Precisão (pose) & Cobertura \\
@@ -373,6 +372,7 @@ urban26 & 145 / 0 & 0,57 & 4 & 1,00 & 1,00 & 49\,\% \\
 urban27 & 236 / 134 & 0,64 & 15 & 0,93 & 0,93 & 92\,\% \\
 urban28$\dagger$ & 1114 / 595 & 0,73 & 77 & 0,91 & 0,87 & 84\,\% \\
 urban30 & 121 / 0 & 0,31 & 6 & 1,00 & 0,83 & 92\,\% \\
+urban32$\dagger$ & 100 / 0 & 0,83 & 8 & 0,88 & 0,88 & 100\,\% \\
 urban38 & 1124 / 586 & 0,65 & 82 & 0,89 & 0,83 & 81\,\% \\
 urban39 & 918 / 571 & 0,56 & 49 & 0,92 & 0,80 & 74\,\% \\
 \bottomrule
@@ -382,29 +382,29 @@ Em revisitas de sentido oposto, R@1 $\approx 0$ em todas as sequências.
 
 \subsection{Robustez a laços falsos}
 \begin{table}[H]\centering\small
-\caption{Laços falsos em 7 sequências (84 execuções por configuração, 4440 laços falsos injetados).}
+\caption{Laços falsos nas 10 sequências (120 execuções por configuração, 6360 laços falsos injetados).}
 \label{tab:falsos}
 \resizebox{\linewidth}{!}{%
 \begin{tabular}{lrrrrr}
 \toprule
 Configuração & Barrados pela porta & Falsos aceitos (execuções) & Reais mantidos & ATE mediano & Pior ATE \\
 \midrule
-\textbf{Sistema completo} & 4040 (91\,\%) & \textbf{28 (8)} & 87\,\% & \textbf{12,9\,m} & 365\,m \\
-sem porta & 0 & 33 (8) & 74\,\% & 36,6\,m & 318\,m \\
-sem PCM & 4021 & 32 (10) & 80\,\% & 14,6\,m & 328\,m \\
-sem GNC-TLS & 4040 & 82 (27) & 91\,\% & 13,4\,m & 563\,m \\
-\textbf{sem nenhuma rejeição} & 0 & \textbf{4080 (78)} & 96\,\% & \textbf{506\,m} & 775\,m \\
-GNC antigo & 4040 & 27 (9) & 92\,\% & 12,6\,m & 377\,m \\
+\textbf{Sistema completo} & 5959 (94\,\%) & \textbf{28 (8)} & 87\,\% & \textbf{13,6\,m} & 365\,m \\
+sem porta & 0 & 33 (8) & 71\,\% & 42,7\,m & 318\,m \\
+sem PCM & 5940 & 32 (10) & 80\,\% & 20,0\,m & 328\,m \\
+sem GNC-TLS & 5959 & 82 (27) & 91\,\% & 22,9\,m & 563\,m \\
+\textbf{sem nenhuma rejeição} & 0 & \textbf{5290 (103)} & 96\,\% & \textbf{527\,m} & diverge \\
+GNC antigo & 5959 & 27 (9) & 92\,\% & 12,9\,m & 377\,m \\
 \bottomrule
 \end{tabular}}
 \end{table}
 \begin{itemize}
-  \item Sem rejeição, o sistema aceita 92\,\% dos laços falsos e o ATE mediano vai a 506\,m. Com as três camadas,
-        0,6\,\% entram e o ATE mediano fica no valor sem injeção.
-  \item A porta barra 91\,\%; o GNC pega a maior parte do resto (sem ele, aceitos 28 $\to$ 82); o PCM protege os laços
+  \item Sem rejeição, o sistema aceita 83\,\% dos laços falsos e o ATE mediano vai a 527\,m (com casos de divergência
+        do solver). Com as três camadas, 0,4\,\% entram e o ATE mediano fica no valor sem injeção.
+  \item A porta barra 94\,\%; o GNC pega a maior parte do resto (sem ele, aceitos 28 $\to$ 82); o PCM protege os laços
         reais (80 $\to$ 87\,\% mantidos).
-  \item \textbf{GNC novo $\times$ antigo: empate} (execução a execução, pior em 7 e melhor em 8 de 84). O novo tem um
-        modo de falha próprio, em investigação: em urban39 rejeitou todos os 54 laços reais (ATE 109\,m).
+  \item \textbf{GNC novo $\times$ antigo: empate} (27 contra 28 aceitos). O novo tem um modo de falha próprio, em
+        investigação: em urban39 rejeitou todos os 54 laços reais (ATE 109\,m).
   \item O pior caso é igual nas duas versões: urban33, 100 laços em grupos ($\sim$370\,m). Sem nenhum laço real
         (revisitas só em sentido oposto), grupos consistentes de laços falsos não têm com o que competir.
 \end{itemize}
@@ -423,24 +423,56 @@ porque a roda é a única fonte de escala métrica. Altura $\pm5$\,cm e atraso $
 (exceção a repetir: urban38 com +5\,cm, 162\,m numa execução). Cautela: com 3 execuções de referência e 1 por
 perturbação, a marca ``fora da faixa'' aparece com frequência sem efeito real.
 
-\subsection{Comparação com o ORB-SLAM3}
+\subsection{Sensibilidade da porta de deriva}
 \begin{table}[H]\centering\small
-\caption{ATE [m] no trecho coberto pelo maior mapa do ORB-SLAM3 (r1; demais sequências em andamento).}
-\begin{tabular}{lrrrrr}
+\caption{Porta de deriva variada no replay (8 sequências com revisita; 8 execuções sem injeção e 64 com injeção
+de 10 e 50 laços falsos por configuração).}
+\begin{tabular}{lrrrr}
 \toprule
-Seq. & Cobertura (mapas) & ORB-SLAM3 (Sim(3)) & Nosso VO puro (Sim(3)) & \textbf{Nosso sistema} (SE(3)) & Só roda \\
+Porta & Reais mantidos (sem injeção) & Falsos barrados & Falsos aceitos & Execuções com falha \\
 \midrule
-urban26 & 32\,\% (5) & 10,4 & 11,7 & \textbf{2,3} & 3,9 \\
-urban27 & 100\,\% (1) & 17,1 & 93,2 & \textbf{12,5} & 91,5 \\
+\textbf{15\,m + 10\,\% (padrão)} & \textbf{95,8\,\%} & 92,1\,\% & 21 & 7 de 64 \\
+15\,m + 5\,\% & 81,7\,\% & 97,2\,\% & 21 & 12 \\
+15\,m + 20\,\% & 95,8\,\% & 81,9\,\% & 34 & 14 \\
+5\,m + 10\,\% & 95,8\,\% & 92,3\,\% & 16 & 6 \\
+30\,m + 10\,\% & 95,8\,\% & 91,8\,\% & 22 & 7 \\
 \bottomrule
 \end{tabular}
 \end{table}
+O termo proporcional de 10\,\% cobre a pior deriva medida da roda (8,6\,\%): com 5\,\% a porta barra laços verdadeiros
+(urban30 perde todos e vai a 79\,m); com 20\,\% entram mais laços falsos e as falhas dobram. O termo fixo (5, 15 ou
+30\,m) quase não importa, porque nos laços com centenas de metros entre as passagens quem manda é o termo proporcional.
+
+\subsection{Comparação com o ORB-SLAM3}
+\begin{table}[H]\centering\small
+\caption{ATE [m] no trecho coberto pelo maior mapa do ORB-SLAM3: mediana [mín--máx] das execuções que não abortaram.
+Nossos métodos avaliados no mesmo trecho. $\dagger$ = teste cego.}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrrr}
+\toprule
+Seq. & Cobertura & ORB-SLAM3 (Sim(3)) & Nosso VO puro (Sim(3)) & \textbf{Nosso sistema} (SE(3)) & Abortos \\
+\midrule
+urban26 & 32\,\% & 10,4 [8,9--20,9] & 12,8 & \textbf{2,3} & 0/3 \\
+urban27 & 100\,\% & 19,9 [17,1--41,7] & 93,2 & \textbf{12,5} & 0/3 \\
+urban28$\dagger$ & 92\,\% & 207,8 [134--420] & 423,0 & \textbf{7,2} & 0/3 \\
+urban30 & 48\,\% & 105,2 [47--163] & 44,1 & \textbf{7,5} & 1/3 \\
+urban31$\dagger$ & 8\,\% & 88,5 [1,8--175] & 54,5 & \textbf{2,4} & 1/3 \\
+urban32$\dagger$ & 26\,\% & 14,7 [8,8--41,4] & 4,6 & \textbf{2,7} & 0/3 \\
+urban33 & 22\,\% & 60,1 [8,1--112] & 6,7 & \textbf{5,2} & 1/3 \\
+urban37$\dagger$ & 12\,\% & 64,7 [14,7--70,3] & perdido & \textbf{1,2} & 0/3 \\
+urban38 & 73\,\% & 72,3 [48--116] & 373,0 & \textbf{6,9} & 0/3 \\
+urban39 & 34\,\% & 33,2 [23,3--43,2] & \textbf{9,2} & 16,5 & 1/3 \\
+\bottomrule
+\end{tabular}}
+\end{table}
 \begin{itemize}
-  \item Quando não se perde, o VO do ORB-SLAM3 é bem melhor que o nosso VO puro (17 contra 93\,m na urban27): reusa o
-        mapa e tem BA local maior. A dissertação não deve afirmar que o nosso VO supera o estado da arte.
-  \item O sistema completo ainda é melhor nas duas, por três motivos que o ORB-SLAM3 monocular não tem: escala métrica
-        sem o GT (o Sim(3) dá ao ORB-SLAM3 a escala do GT), continuidade quando o VO cai (na urban26 o ORB-SLAM3 se
-        partiu em 5 mapas) e fechamento de laço funcionando (o ORB-SLAM3 não fechou nenhum na urban27).
+  \item O ORB-SLAM3 monocular raramente cobre o percurso inteiro: só na urban27 o maior mapa tem 100\,\%; nas demais
+        ele se fragmenta em vários mapas (8 a 92\,\%), e 4 das 30 execuções abortaram.
+  \item No trecho que ele cobre, o nosso sistema tem ATE menor em 9 das 10 sequências, por escala métrica sem o GT
+        (o Sim(3) dá ao ORB-SLAM3 a escala do GT), continuidade quando o VO cai e fechamento de laço funcionando.
+  \item Quando não se perde, o VO do ORB-SLAM3 é melhor que o nosso VO puro (urban27: 20 contra 93\,m; urban38: 72
+        contra 373\,m). A dissertação não deve afirmar que o nosso VO supera o estado da arte.
+  \item A exceção é a urban39, onde o nosso VO puro (9,2\,m) supera o sistema completo (16,5\,m) no trecho de 34\,\%.
 \end{itemize}
 \begin{figure}[H]\centering
 \figurase{../resultados/kaist/urban27/orbslam3_r1/comparacao_orbslam3.png}{\linewidth}
@@ -459,8 +491,6 @@ roda: 3,7 e 1,9\,cm). A fusão segue a roda, em que o grafo confia mais.
   \item O VO perde o rastreamento em alta velocidade (urban37) e trânsito denso (urban31, urban30).
   \item O sistema completo não é determinístico; todo resultado do sistema completo deve ser lido como mediana com faixa.
   \item O replay dos laços falsos não realimenta o VO.
-  \item Pendentes na bateria: detector em urban32, laços falsos em urban31/32/37, porta de deriva, ORB-SLAM3 nas 10
-        sequências com 3 repetições.
   \item Pendentes fora da bateria: investigar o modo de falha do GNC novo; repetir urban38 com altura +5\,cm; novos
         conjuntos com o robô da plataforma SLAM-Teaching (importador e calibrador prontos).
 \end{itemize}

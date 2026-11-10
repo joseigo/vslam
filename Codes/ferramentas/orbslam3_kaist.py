@@ -153,7 +153,12 @@ def avaliar(out, seq_dir):
                                 ("só roda, mesmo trecho", "completo_r1/evo/so_roda.txt", False)):
             f = os.path.join(seq_dir, arq)
             if os.path.isfile(f):
-                e2, ref2 = ate(gt, read_tum(f), sim3, t_janela=janela)
+                try:
+                    e2, ref2 = ate(gt, read_tum(f), sim3, t_janela=janela)
+                except Exception as ex:                        # ex.: VO parado no trecho -> Umeyama degenerado
+                    print(f"  {nome}: sem ATE ({ex})")
+                    linhas.append(dict(metodo=nome, ate_m=np.nan, cobertura_pct=np.nan, obs="alinhamento degenerado"))
+                    continue
                 curvas[nome.replace(", mesmo trecho", "")] = ate.ultimo
                 linhas.append(dict(metodo=nome, ate_m=e2, cobertura_pct=100 * comprimento(ref2) / L_total))
     pd.DataFrame(linhas).to_csv(os.path.join(out, "metricas.csv"), index=False)
