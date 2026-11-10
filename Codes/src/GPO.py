@@ -498,7 +498,15 @@ class GraphPoseOptimizer:
         if c.loop_gnc_init == "odometria":
             values = self._odometry_solution(values, max_iters)
         cand = w > 0
-        vals = solve(w, values, max_iters)
+        if c.loop_gnc_init == "odometria":
+            # ponto de partida: odometria + só o clique do PCM. Partir de mínimos quadrados com TODOS os candidatos
+            # deixa um laço falso enorme entortar tudo; com os fatores de odometria fixos em peso 1, os pesos iniciais
+            # (todos ~0) levam de volta à odometria, de onde a deriva faz os laços reais parecerem outliers e o GNC
+            # rejeita todos (urban39, 50/100 laços falsos aleatórios: 0 de 54 reais, ATE 109 m).
+            w0 = np.array([1.0 if k in self.loop_isam_idx else 0.0 for k in range(len(self.loops))])
+            vals = solve(w0, values, max_iters)
+        else:
+            vals = solve(w, values, max_iters)
         res = r2(vals)
         if res[cand].max(initial=0.0) > cb2:
             mu = cb2 / max(2 * res[cand].max() - cb2, 1e-9)
@@ -509,7 +517,10 @@ class GraphPoseOptimizer:
                 w_new = np.where(cand, w_new, 0.0)
                 vals = solve(w_new, vals, inner_iters)
                 res = r2(vals)
-                done = np.abs(w_new - w).max() < 1e-3 and np.all((w_new < 1e-3) | (w_new > 1 - 1e-3))
+                # binário E já recozido (limite superior a <10% do chi2): com todos os pesos ~0 no início o teste
+                # "binário e parado" passava na 2ª iteração, antes de o GNC fazer qualquer coisa
+                done = (np.abs(w_new - w).max() < 1e-3 and np.all((w_new < 1e-3) | (w_new > 1 - 1e-3))
+                        and mu >= 10.0)
                 w = w_new
                 if done:
                     break
