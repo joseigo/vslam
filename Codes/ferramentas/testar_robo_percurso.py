@@ -2,9 +2,10 @@
 Teste LONGO do robô do SLAM-Teaching: voltas em volta da mesa do laboratório, nos dois sentidos, com a câmera do robô
 gravando, como num conjunto de dados de verdade. Complementa testar_robo_slam_teaching.py (teste de bancada curto).
 
-Percurso: retângulo em volta da mesa (x 0,28-1,54 m, y -0,01-1,50 m no referencial da GT; ~5,5 m por volta), a 35 cm
-da mesa e >= 44 cm das bordas da área vista. Controle de posição em malha fechada na GT, a V m/s.
-SEGURANÇA: para se a GT ficar velha (> 0,5 s; aborta após 3 s), se o robô chegar a < 20 cm da mesa ou < 15 cm da borda
+Percurso: retângulo (x 0,25-1,30 m, y 0-1,50 m no referencial da GT; ~5,1 m por volta) nos dois sentidos e depois uma
+'gravata-borboleta' (diagonais cruzando no centro: revisita em direções diferentes), >= 37 cm dos obstáculos
+(OBSTACULOS) e >= 40 cm das bordas da área vista. Controle de posição em malha fechada na GT, a V m/s.
+SEGURANÇA: para se a GT ficar velha (> 0,5 s; aborta após 3 s), se o robô chegar a < 20 cm de um obstáculo ou < 15 cm da borda
 da área vista. Ctrl+C para o robô. O robô para sempre no fim.
 
 Mede:
@@ -36,10 +37,14 @@ sys.path.insert(0, HERE)
 from importar_slam_teaching import SLAM_TEACHING  # noqa: E402
 
 RES = os.path.abspath(os.path.join(HERE, "..", "..", "resultados", "robo_teste"))
-MESA = (0.63, 1.19, 0.34, 1.15)               # x0, x1, y0, y1 (projeção conservadora do tampo no chão)
-RETANGULO = [(0.28, -0.01), (1.54, -0.01), (1.54, 1.50), (0.28, 1.50)]   # anti-horário
+# obstáculos (x0, x1, y0, y1) no referencial da GT, medidos na imagem do teto (projeção conservadora no chão)
+OBSTACULOS = {"mesa e gaveteiro": (1.84, 2.50, 0.14, 0.97), "pessoa (canto)": (1.67, 2.50, -0.60, 0.14),
+              "pedestais": (1.10, 1.95, 1.93, 2.30), "placa": (2.19, 2.50, 1.38, 2.30)}
+RETANGULO = [(0.25, 0.0), (1.30, 0.0), (1.30, 1.50), (0.25, 1.50)]       # anti-horário, ~5,1 m
+GRAVATA = [(0.25, 0.0), (1.30, 1.50), (0.25, 1.50), (1.30, 0.0)]         # diagonais cruzando no centro
 THETA_OFFSET = -0.079                          # rad, medido pelo testar_robo_slam_teaching.py em 2026-11-10
 DIST_MESA_MIN, MARGEM_MIN, GT_MAX_IDADE = 0.20, 0.15, 0.5
+TTL_MS = 400                                   # prazo de cada comando de roda (firmware com o patch)
 WHEEL_BASE, V_RODA_MAX = 0.143, 0.25
 
 
@@ -47,9 +52,10 @@ def wrap(a):
     return float(np.arctan2(np.sin(a), np.cos(a)))
 
 
-def dist_mesa(x, y):
-    x0, x1, y0, y1 = MESA
-    return float(np.hypot(max(x0 - x, 0, x - x1), max(y0 - y, 0, y - y1)))
+def dist_obst(x, y):
+    """(distância ao obstáculo mais próximo, nome)."""
+    return min((float(np.hypot(max(x0 - x, 0, x - x1), max(y0 - y, 0, y - y1))), n)
+               for n, (x0, x1, y0, y1) in OBSTACULOS.items())
 
 
 class Abortar(Exception):
@@ -60,6 +66,7 @@ class Percurso:
     def __init__(self, a):
         self.a = a
         self.odom, self.rodas, self.gt_log, self.cam_log, self.voltas = [], [], [], [], []
+        self.status_log = []
         self.out = os.path.join(RES, time.strftime("percurso_%Y-%m-%d_%H-%M-%S"))
         os.makedirs(self.out, exist_ok=True)
         self.linhas = []
@@ -100,6 +107,12 @@ class Percurso:
                         d = json.loads(msg.payload.decode())
                         x, y, th = (float(v) for v in d["odometria"].split(","))
                         self.odom.append((t, x, y, th, d["timestamp_us"] / 1e6))
+                    elif msg.topic == "swarm/robot2/telemetry/reset":
+                        self.log(f"  [último reset do robô: {msg.payload.decode(errors='replace')}"
+                                 f"{' (retido)' if msg.retain else ''}]")
+                    elif msg.topic == robo.TOPIC_STATUS and not msg.retain:
+                        self.status_log.append((t, msg.payload.decode(errors="replace")))
+                        print(f"  [status do robô: {msg.payload.decode(errors='replace')}]", flush=True)
                     elif msg.topic == robo.TOPIC_WHEELS:
                         d = json.loads(msg.payload.decode())
                         wl, wr = (float(v) for v in d["wheels"].split(","))
@@ -108,6 +121,7 @@ class Percurso:
                     pass
                 original(client, userdata, msg)
             robo._client.on_message = escuta
+            robo._client.subscribe("swarm/robot2/telemetry/reset")    # motivo do reset (firmware com o patch)
         self.robo, self.gt = robo, gt
         robo.stop()
 
@@ -127,9 +141,8 @@ class Percurso:
         self._cv2 = cv2
 
     def reinicio(self):
-        """Reinício do firmware: status Offline, ou odometria saltando para ~(0,0,0) longe de onde estava."""
-        if not self.a.sim and self.robo.get_status() == "Offline":
-            return True
+        """Reinício do firmware = odometria saltando para ~(0,0,0) longe de onde estava (o firmware só zera no boot).
+        Status 'Offline' sozinho é queda do MQTT (o publish bloqueia com o Wi-Fi cheio), não reinício."""
         if len(self.odom) >= 2 and getattr(self, "t_ini", None):
             (_, x0, y0, *_), (_, x1, y1, th1, _) = self.odom[-2], self.odom[-1]
             if abs(x1) + abs(y1) + abs(th1) < 1e-3 and np.hypot(x0, y0) > 0.05:
@@ -152,6 +165,10 @@ class Percurso:
                 robo.send_wheel_speed(0, 0)
                 raise Abortar("o ROBÔ REINICIOU (odometria voltou a zero / status Offline): queda de tensão? "
                               "bateria baixa? giro rápido com a câmera ligada?")
+            if self.odom and time.time() - self.odom[-1][0] > 1.0:
+                robo.send_wheel_speed(0, 0)                    # telemetria parada: os comandos também atrasam
+                time.sleep(0.05)
+                continue
             if not self.gt_atual():
                 robo.send_wheel_speed(0, 0)
                 sem_gt = sem_gt or time.time()
@@ -161,8 +178,9 @@ class Percurso:
                 continue
             sem_gt = None
             x, y, th = gt.get_pose()
-            if dist_mesa(x, y) < DIST_MESA_MIN:
-                raise Abortar(f"perto da mesa ({dist_mesa(x, y):.2f} m) em ({x:.2f}, {y:.2f})")
+            do, no = dist_obst(x, y)
+            if do < DIST_MESA_MIN:
+                raise Abortar(f"perto de '{no}' ({do:.2f} m) em ({x:.2f}, {y:.2f})")
             if self.margem(x, y) < margem_min:
                 raise Abortar(f"perto da borda ({self.margem(x, y):.2f} m) em ({x:.2f}, {y:.2f})")
             dx, dy = ref[0] - x, ref[1] - y
@@ -176,9 +194,19 @@ class Percurso:
             k = max(abs(vl), abs(vr)) / V_RODA_MAX
             if k > 1:
                 vl, vr = vl / k, vr / k
-            robo.send_wheel_speed(vl, vr)
+            self.enviar(vl, vr)
             time.sleep(0.05)
         raise Abortar(f"não chegou a {ref} em {timeout} s")
+
+    def enviar(self, vl, vr):
+        """Comando das rodas com prazo (ttl_ms): com o firmware corrigido, o robô para sozinho se os comandos
+        pararem de chegar (rede atrasada); o firmware antigo ignora o campo."""
+        if self.a.sim:
+            self.robo.send_wheel_speed(vl, vr)
+            return
+        R = self.robo.WHEEL_RADIUS
+        self.robo._client.publish(self.robo.TOPIC_CMD_WHEELS,
+                                  json.dumps({"l": vl / R, "r": vr / R, "ttl_ms": TTL_MS}))
 
     def amostrar_camera(self):
         while self._cam_rodando:
@@ -192,7 +220,8 @@ class Percurso:
             self.conectar()
             robo = self.robo
             x, y, _ = self.gt.get_pose()
-            self.log(f"GT: ({x:.2f}, {y:.2f}); margem {self.margem(x, y):.2f} m; mesa a {dist_mesa(x, y):.2f} m")
+            self.log(f"GT: ({x:.2f}, {y:.2f}); margem {self.margem(x, y):.2f} m; obstáculo mais perto: "
+                     f"{dist_obst(x, y)[1]} a {dist_obst(x, y)[0]:.2f} m")
             inicio = min(RETANGULO, key=lambda p: np.hypot(p[0] - x, p[1] - y))
             self.log(f"indo ao canto de partida {inicio}")
             self.ir_ate(inicio, 0.10, margem_min=0.05)          # 1º trecho: pode partir perto da borda (vai p/ dentro)
@@ -208,9 +237,12 @@ class Percurso:
             robo.record(True)
             self.t_ini = time.time()
             i0 = RETANGULO.index(inicio)
-            for sentido, nome in ((1, "anti-horário"), (-1, "horário")):
-                ordem = [RETANGULO[(i0 + sentido * k) % 4] for k in range(1, 5)]
-                for v in range(self.a.voltas):
+            j0 = GRAVATA.index(inicio)
+            planos = [(nome, [RETANGULO[(i0 + sentido * k) % 4] for k in range(1, 5)], self.a.voltas)
+                      for sentido, nome in ((1, "anti-horário"), (-1, "horário"))]
+            planos.append(("gravata", [GRAVATA[(j0 + k) % 4] for k in range(1, 5)], self.a.gravatas))
+            for nome, ordem, n in planos:
+                for v in range(n):
                     t0 = time.time()
                     for p in ordem:
                         self.ir_ate(p, self.a.v)
@@ -314,6 +346,8 @@ class Percurso:
             self.log(f"câmera: {dc / (C[-1, 0] - C[0, 0]):.1f} fps médio (mín {np.nanmin(C[2:, 1]):.1f}, "
                      f"máx {np.nanmax(C[2:, 1]):.1f}); perdidos {dp:.0f} de {dc + dp:.0f} "
                      f"({100 * dp / max(dc + dp, 1):.0f}%); atraso mediano {1000 * np.nanmedian(C[:, 4]):.0f} ms")
+        n_off = sum(1 for t, sx in self.status_log if sx == "Offline" and self.t_ini <= t <= self.t_fim)
+        self.log(f"quedas do MQTT (status Offline): {n_off}")
         np.savez(os.path.join(self.out, "dados_brutos.npz"), odom=O, gt=G, cam=C, rodas=np.array(self.rodas),
                  voltas=np.array([(v, t0, t1) for _, v, t0, t1 in self.voltas]), lag=lag)
         with open(os.path.join(self.out, "odometria_relogio_robo.csv"), "w") as f:
@@ -358,8 +392,8 @@ class Percurso:
         AZ, LA, CI = "#1a73e8", "#e8710a", "0.55"
         fig, ax = plt.subplots(2, 2, figsize=(14, 10))
         a = ax[0, 0]
-        x0, x1, y0, y1 = MESA
-        a.fill([x0, x1, x1, x0], [y0, y0, y1, y1], color="#c8a165", alpha=0.5, label="mesa")
+        for k, (x0, x1, y0, y1) in enumerate(OBSTACULOS.values()):
+            a.fill([x0, x1, x1, x0], [y0, y0, y1, y1], color="#c8a165", alpha=0.5, label="obstáculos" if k == 0 else None)
         ar = self.gt.area_visivel()
         a.plot(*np.vstack([ar, ar[:1]]).T, color=CI, ls="--", lw=1, label="área vista")
         a.plot(G[:, 1], G[:, 2], color=LA, lw=1.5, label="GT (teto)")
@@ -404,6 +438,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--repo", default=SLAM_TEACHING)
     ap.add_argument("--voltas", type=int, default=3, help="voltas em CADA sentido")
+    ap.add_argument("--gravatas", type=int, default=2, help="voltas da gravata-borboleta (diagonais cruzadas)")
     ap.add_argument("--v", type=float, default=0.15, help="velocidade nas retas (m/s)")
     ap.add_argument("--w-max", type=float, default=0.6, help="velocidade angular máxima (rad/s) nos giros")
     ap.add_argument("--sem-camera", action="store_true", help="não liga o vídeo do robô")

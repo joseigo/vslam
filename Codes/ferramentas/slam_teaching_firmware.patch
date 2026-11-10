@@ -1,0 +1,96 @@
+--- a/firmware/main/main.c	2026-11-10 17:05:35.692485383 -0300
++++ b/firmware/main/main.c	2026-11-10 17:05:44.576470351 -0300
+@@ -635,6 +635,29 @@
+ }
+ // ------------------------------------------- SUPERVISOR FUNCTIONS
+ 
++// Prazo do último comando de roda (µs, esp_timer). 0 = sem prazo (comportamento antigo: mantém a última velocidade).
++// Definido quando o comando traz "ttl_ms": se não chegar outro comando a tempo, o controle zera as referências.
++static volatile int64_t s_cmd_deadline_us = 0;
++
++static const char *reset_reason_str(void) {
++    switch (esp_reset_reason()) {
++        case ESP_RST_POWERON:   return "POWERON (energia ligada/cortada)";
++        case ESP_RST_BROWNOUT:  return "BROWNOUT (queda de tensao)";
++        case ESP_RST_PANIC:     return "PANIC (excecao no firmware)";
++        case ESP_RST_INT_WDT:   return "INT_WDT (watchdog de interrupcao)";
++        case ESP_RST_TASK_WDT:  return "TASK_WDT (watchdog de tarefa)";
++        case ESP_RST_WDT:       return "WDT (outro watchdog)";
++        case ESP_RST_SW:        return "SW (esp_restart)";
++        case ESP_RST_EXT:       return "EXT (pino de reset)";
++        case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
++        case ESP_RST_SDIO:      return "SDIO";
++        case ESP_RST_USB:       return "USB";
++        case ESP_RST_PWR_GLITCH: return "PWR_GLITCH (falha rapida de energia)";
++        case ESP_RST_CPU_LOCKUP: return "CPU_LOCKUP";
++        default:                return "DESCONHECIDO";
++    }
++}
++
+ void control_timer_callback(void* arg) {
+     if (!s_control_active) {
+         return;
+@@ -645,6 +668,12 @@
+         return;
+     }
+ 
++    // Comando com prazo vencido (o PC parou de mandar, ou a rede atrasou): para as rodas.
++    if (s_cmd_deadline_us != 0 && esp_timer_get_time() > s_cmd_deadline_us) {
++        robot.wl_ref = 0; robot.wr_ref = 0;
++        s_cmd_deadline_us = 0;
++    }
++
+     int count_l = 0, count_r = 0;
+     pcnt_unit_get_count(enc_left, &count_l);
+     pcnt_unit_get_count(enc_right, &count_r);
+@@ -926,6 +955,12 @@
+         case MQTT_EVENT_CONNECTED:
+             ESP_LOGI(TAG_MQTT, "MQTT Connected");
+             esp_mqtt_client_publish(mqtt_client, "swarm/robot2/telemetry/status", "Online", 0, 1, 0);
++            {   // motivo do último reset (retido no broker: dá para ler depois do fato)
++                char rst[96];
++                snprintf(rst, sizeof(rst), "{\"motivo\": \"%s\", \"uptime_ms\": %lld}",
++                         reset_reason_str(), (long long)(esp_timer_get_time() / 1000));
++                esp_mqtt_client_publish(mqtt_client, "swarm/robot2/telemetry/reset", rst, 0, 1, 1);
++            }
+             xEventGroupSetBits(s_mqtt_event_group, MQTT_CONNECTED_BIT);
+             esp_mqtt_client_subscribe(mqtt_client, "swarm/robot2/cmd/wheels", 0);
+             esp_mqtt_client_subscribe(mqtt_client, "swarm/robot2/cmd/odometry", 0);
+@@ -990,6 +1025,9 @@
+                         
+                         robot.wl_ref = v_l;
+                         robot.wr_ref = v_r;
++                        cJSON *ttl = cJSON_GetObjectItem(root, "ttl_ms");
++                        s_cmd_deadline_us = (ttl && cJSON_IsNumber(ttl) && ttl->valuedouble > 0)
++                            ? esp_timer_get_time() + (int64_t)(ttl->valuedouble * 1000.0) : 0;
+                         xSemaphoreGive(robot_mutex);
+                         ESP_LOGI(TAG_MQTT, "Ref update: %.2f, %.2f rad/s", robot.wl_ref, robot.wr_ref);
+                     }
+@@ -1046,6 +1084,7 @@
+             .msg_len = strlen("Offline"),
+             .retain = 0
+         },
++        .outbox.limit = 32768,      // telemetria enfileirada (enqueue): não cresce sem limite se a rede travar
+         .task.priority = 6
+     };
+     mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
+@@ -1228,7 +1267,9 @@
+             snprintf(json_buffer, sizeof(json_buffer), 
+                 "{\"odometria\": \"%.4f, %.4f, %.4f\", \"timestamp_us\": %llu}",
+                 x, y, theta, (unsigned long long)odom_ts_us);
+-            int pub_odom = esp_mqtt_client_publish(mqtt_client, "swarm/robot2/telemetry/odometry", json_buffer, 0, 0, 0);
++            // enqueue (não bloqueia): com o Wi-Fi ocupado pelo vídeo, publish travava esta tarefa por segundos e a
++            // odometria deixava de ser amostrada no ritmo certo
++            int pub_odom = esp_mqtt_client_enqueue(mqtt_client, "swarm/robot2/telemetry/odometry", json_buffer, 0, 0, 0, true);
+             if (pub_odom < 0) {
+                 TickType_t now = xTaskGetTickCount();
+                 if (now - last_pub_fail_log > pdMS_TO_TICKS(3000)) {
+@@ -1242,7 +1283,7 @@
+             // JSON: {"wheels": "wl, wr"} em rad/s
+             snprintf(json_buffer, sizeof(json_buffer), 
+                 "{\"wheels\": \"%.3f, %.3f\"}", vl, vr);
+-            int pub_wheels = esp_mqtt_client_publish(mqtt_client, "swarm/robot2/telemetry/wheels", json_buffer, 0, 0, 0);
++            int pub_wheels = esp_mqtt_client_enqueue(mqtt_client, "swarm/robot2/telemetry/wheels", json_buffer, 0, 0, 0, true);
+             if (pub_wheels < 0) {
+                 TickType_t now = xTaskGetTickCount();
+                 if (now - last_pub_fail_log > pdMS_TO_TICKS(3000)) {
