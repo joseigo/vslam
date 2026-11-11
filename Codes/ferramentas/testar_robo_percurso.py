@@ -87,7 +87,7 @@ class Percurso:
             def amostrar():
                 while True:
                     t = time.time()
-                    self.odom.append((t, *robo.get_odometry(), t))
+                    self.odom.append((t, *robo.get_odometry(), t, np.nan, np.nan, np.nan))
                     self.rodas.append((t, *robo.get_wheel_speeds()))
                     time.sleep(0.1)
             threading.Thread(target=amostrar, daemon=True).start()
@@ -106,7 +106,9 @@ class Percurso:
                     if msg.topic == robo.TOPIC_ODOM:
                         d = json.loads(msg.payload.decode())
                         x, y, th = (float(v) for v in d["odometria"].split(","))
-                        self.odom.append((t, x, y, th, d["timestamp_us"] / 1e6))
+                        # firmware novo: pulsos acumulados ("ticks": "L, R") e nº de sequência; antigo: NaN
+                        tl, tr = (float(v) for v in d["ticks"].split(",")) if "ticks" in d else (np.nan, np.nan)
+                        self.odom.append((t, x, y, th, d["timestamp_us"] / 1e6, tl, tr, float(d.get("seq", np.nan))))
                     elif msg.topic == "swarm/robot2/telemetry/reset":
                         self.log(f"  [último reset do robô: {msg.payload.decode(errors='replace')}"
                                  f"{' (retido)' if msg.retain else ''}]")
@@ -144,7 +146,7 @@ class Percurso:
         """Reinício do firmware = odometria saltando para ~(0,0,0) longe de onde estava (o firmware só zera no boot).
         Status 'Offline' sozinho é queda do MQTT (o publish bloqueia com o Wi-Fi cheio), não reinício."""
         if len(self.odom) >= 2 and getattr(self, "t_ini", None):
-            (_, x0, y0, *_), (_, x1, y1, th1, _) = self.odom[-2], self.odom[-1]
+            (_, x0, y0, *_), (_, x1, y1, th1, *_) = self.odom[-2], self.odom[-1]
             if abs(x1) + abs(y1) + abs(th1) < 1e-3 and np.hypot(x0, y0) > 0.05:
                 return True
         return False
@@ -307,6 +309,12 @@ class Percurso:
         d = np.diff(O[:, 0])
         self.log(f"buracos na chegada da odometria: máx {1000 * d.max():.0f} ms, {np.sum(d > 0.3)} acima de 300 ms "
                  f"(no relógio do robô: máx {1000 * np.diff(O[:, 4]).max():.0f} ms)")
+        if np.isfinite(O[:, 7]).all() and len(O) > 1:            # firmware com nº de sequência
+            ds = np.diff(O[:, 7])
+            self.log(f"mensagens de odometria perdidas (pelo seq): {int(np.sum(ds[ds > 1] - 1))} de {int(O[-1, 7] - O[0, 7] + 1)}"
+                     f"; fora de ordem: {int(np.sum(ds < 1))}")
+        if np.isfinite(O[:, 5]).all() and len(O) > 1:            # pulsos brutos: odometria recalculável no PC
+            self.odometria_pelos_pulsos(O, G, lag)
 
         # erro da odometria nos instantes da GT (GT corrigida pelo atraso)
         tg = G[:, 0] - lag
@@ -351,9 +359,9 @@ class Percurso:
         np.savez(os.path.join(self.out, "dados_brutos.npz"), odom=O, gt=G, cam=C, rodas=np.array(self.rodas),
                  voltas=np.array([(v, t0, t1) for _, v, t0, t1 in self.voltas]), lag=lag)
         with open(os.path.join(self.out, "odometria_relogio_robo.csv"), "w") as f:
-            f.write("t_robo,t_pc,x,y,theta\n")
-            for t, x, y, th, tr in O:
-                f.write(f"{tr:.6f},{t:.6f},{x:.6f},{y:.6f},{th:.6f}\n")
+            f.write("t_robo,t_pc,x,y,theta,ticks_l,ticks_r,seq\n")
+            for t, x, y, th, tr, tl, trr, sq in O:
+                f.write(f"{tr:.6f},{t:.6f},{x:.6f},{y:.6f},{th:.6f},{tl:.0f},{trr:.0f},{sq:.0f}\n")
         self.figura(O, G, th_o, Go, tg, ok_r, e_r, ok_c, e_c, C, dist_total)
         if not self.a.sim:
             self.converter(O, lag)
@@ -384,6 +392,33 @@ class Percurso:
             fh.write(f"\nTEMPOS CORRIGIDOS por testar_robo_percurso.py: odometria no relógio do robô (timestamp_us); "
                      f"GT deslocada em {-1000 * lag:+.0f} ms (atraso estimado).\n")
         self.log(f"sessão convertida: {n} imagens, {r['duracao_s']:.0f} s -> {out} (falta a calibração da câmera)")
+
+    def odometria_pelos_pulsos(self, O, G, lag, raio=0.0823, bitola=0.143, pulsos_volta=1496.0):
+        """Recalcula a odometria no PC a partir dos pulsos brutos (firmware novo) e ajusta raio e bitola contra a GT:
+        a escala da distância dá o raio; a razão giro_odometria/giro_GT dá a bitola. Só informativo (log)."""
+        k = 2 * np.pi / pulsos_volta
+        dl, dr = np.diff(O[:, 5]) * k, np.diff(O[:, 6]) * k                # rad de cada roda por mensagem
+        t = O[1:, 4]
+        tg = G[:, 0] - lag
+        ok = (tg >= O[0, 4]) & (tg <= O[-1, 4])                          # mesmo intervalo dos pulsos
+        if ok.sum() < 20:
+            return
+        def integra(r, b):
+            ds, dth = r * (dl + dr) / 2, r * (dr - dl) / b
+            th = np.r_[0, np.cumsum(dth)]
+            thm = th[:-1] + dth / 2
+            return np.r_[0, np.cumsum(ds * np.cos(thm))], np.r_[0, np.cumsum(ds * np.sin(thm))], th
+        g = G[ok]
+        dist_gt = np.sum(np.hypot(np.diff(g[:, 1]), np.diff(g[:, 2])))
+        giro_gt = np.abs(np.diff(np.unwrap(g[:, 3]))).sum()
+        dist_od = raio * np.sum(np.abs(dl + dr) / 2)
+        giro_od = np.abs(raio * (dr - dl) / bitola).sum()
+        raio_aj = raio * dist_gt / max(dist_od, 1e-9)
+        bitola_aj = bitola * (raio_aj / raio) * giro_od / max(giro_gt, 1e-9)
+        self.log(f"pulsos brutos: distância GT/odometria {dist_gt / max(dist_od, 1e-9):.3f}, giro odometria/GT "
+                 f"{giro_od / max(giro_gt, 1e-9):.3f} -> raio ajustado {1000 * raio_aj:.1f} mm (firmware "
+                 f"{1000 * raio:.1f}), bitola ajustada {1000 * bitola_aj:.1f} mm (firmware {1000 * bitola:.1f})")
+        self.pulsos_calib = dict(raio=raio_aj, bitola=bitola_aj)
 
     def figura(self, O, G, th_o, Go, tg, ok_r, e_r, ok_c, e_c, C, dist_total):
         import matplotlib

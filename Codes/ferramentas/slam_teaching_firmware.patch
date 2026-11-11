@@ -1,6 +1,53 @@
---- a/firmware/main/main.c	2026-11-10 17:05:35.692485383 -0300
-+++ b/firmware/main/main.c	2026-11-10 17:05:44.576470351 -0300
-@@ -635,6 +635,29 @@
+--- a/firmware/main/main.c	2026-11-11 14:14:40.239730093 -0300
++++ b/firmware/main/main.c	2026-11-11 14:14:40.240730090 -0300
+@@ -135,13 +135,16 @@
+ 
+ #define PUBLISH_PERIOD_MS       100
+ 
+-#define QUEUE_SIZE 2
++#define QUEUE_SIZE 1          // com fb_count=2: 1 quadro na fila + 1 livre p/ o driver capturar
+ #define CAMERA_STREAM_FPS 10
+ #define CAMERA_CAPTURE_PERIOD_MS (1000 / CAMERA_STREAM_FPS)
+ #define CAMERA_XCLK_HZ 8000000
+ #define CAMERA_JPEG_QUALITY 18
+ #define CAMERA_UDP_MAX_PAYLOAD 1200
+ #define CAMERA_UDP_DEFAULT_PORT 5001
++#define CAMERA_UDP_FRAGS_POR_PAUSA 6   // espaça a rajada de fragmentos (1 tick a cada N): não enche a fila do Wi-Fi
++// Rampa das referências de roda: limita o degrau de velocidade pedido ao PID (pico de corrente nos motores)
++#define REF_RAMPA_RAD_S_POR_CICLO 0.5f  // rad/s por ciclo de 25 ms = 20 rad/s² (~1,6 m/s² na roda)
+ 
+ // ---------------------------------------------------------------------- TYPES
+ typedef struct {
+@@ -162,6 +165,8 @@
+     float y;                // m
+     float theta;            // rad
+     uint64_t odom_ts_us;    // timestamp da amostragem usada no cálculo
++    int64_t ticks_l;        // pulsos acumulados desde o boot (brutos: o PC pode recalcular a odometria)
++    int64_t ticks_r;
+ 
+     // --- Controle ---
+     float pwm_left;
+@@ -324,8 +329,8 @@
+ 
+         .frame_size = FRAMESIZE_VGA,
+         .jpeg_quality = CAMERA_JPEG_QUALITY,
+-        .fb_count = 1,
+-        .grab_mode = CAMERA_GRAB_WHEN_EMPTY,
++        .fb_count = 2,                      // 2 buffers + GRAB_LATEST: entrega sempre o quadro mais novo
++        .grab_mode = CAMERA_GRAB_LATEST,
+         .fb_location = CAMERA_FB_IN_PSRAM,
+     };
+ 
+@@ -347,7 +352,7 @@
+     } else {
+         ESP_LOGW(TAG_CAM, "esp_camera_sensor_get() retornou NULL");
+     }
+-    ESP_LOGI(TAG_CAM, "Câmera inicializada (QVGA JPEG, xclk=%lu Hz, jpeg_q=%u, fb_count=1)",
++    ESP_LOGI(TAG_CAM, "Câmera inicializada (VGA JPEG, xclk=%lu Hz, jpeg_q=%u, fb_count=2, grab_latest)",
+              (unsigned long)CAMERA_XCLK_HZ, CAMERA_JPEG_QUALITY);
+     return ESP_OK;
+ }
+@@ -635,6 +640,39 @@
  }
  // ------------------------------------------- SUPERVISOR FUNCTIONS
  
@@ -27,10 +74,20 @@
 +    }
 +}
 +
++// Referências efetivamente entregues ao PID (seguem robot.wl_ref/wr_ref com rampa)
++static float s_wl_cmd = 0.0f, s_wr_cmd = 0.0f;
++static int64_t s_ultimo_ciclo_us = 0;
++
++static inline float rampa(float atual, float alvo, float passo) {
++    if (alvo > atual + passo) return atual + passo;
++    if (alvo < atual - passo) return atual - passo;
++    return alvo;
++}
++
  void control_timer_callback(void* arg) {
      if (!s_control_active) {
          return;
-@@ -645,6 +668,12 @@
+@@ -645,6 +683,12 @@
          return;
      }
  
@@ -43,7 +100,70 @@
      int count_l = 0, count_r = 0;
      pcnt_unit_get_count(enc_left, &count_l);
      pcnt_unit_get_count(enc_right, &count_r);
-@@ -926,6 +955,12 @@
+@@ -654,36 +698,50 @@
+     robot.enc_left_delta = count_l;
+     robot.enc_right_delta = count_r;
+ 
++    robot.ticks_l += count_l;
++    robot.ticks_r += count_r;
++
+     struct timeval odom_tv = {0};
+     gettimeofday(&odom_tv, NULL);
+     robot.odom_ts_us = (uint64_t)odom_tv.tv_sec * 1000000ULL + (uint64_t)odom_tv.tv_usec;
+ 
+     /*
+     * 2. Cálculo de Velocidade Angular (rad/s)
+-    * w = (pulsos * fator_conversao) / periodo
++    * w = (pulsos * fator_conversao) / periodo -- com o período REAL desde o último ciclo (o callback pode atrasar,
++    * e um ciclo pulado por mutex ocupado deixa os pulsos acumularem p/ o seguinte)
+     */
++    const int64_t agora_us = esp_timer_get_time();
+     float dt = SAMPLING_PERIOD_MS / 1000.0f;
++    if (s_ultimo_ciclo_us != 0) {
++        const float dt_real = (agora_us - s_ultimo_ciclo_us) / 1e6f;
++        if (dt_real > 0.005f && dt_real < 0.5f) dt = dt_real;
++    }
++    s_ultimo_ciclo_us = agora_us;
+     robot.wl_meas = (count_l * ENCODER_PULSE_TO_RAD) / dt;
+     robot.wr_meas = (count_r * ENCODER_PULSE_TO_RAD) / dt;
+ 
+-    // 3. PID Update (references are in rad/s)
+-    robot.pwm_left = PID_update(&pid_l, robot.wl_ref, robot.wl_meas);
+-    robot.pwm_right = PID_update(&pid_r, robot.wr_ref, robot.wr_meas);
++    // 3. PID Update (references are in rad/s), com rampa nas referências
++    s_wl_cmd = rampa(s_wl_cmd, robot.wl_ref, REF_RAMPA_RAD_S_POR_CICLO);
++    s_wr_cmd = rampa(s_wr_cmd, robot.wr_ref, REF_RAMPA_RAD_S_POR_CICLO);
++    robot.pwm_left = PID_update(&pid_l, s_wl_cmd, robot.wl_meas);
++    robot.pwm_right = PID_update(&pid_r, s_wr_cmd, robot.wr_meas);
+ 
+     // 4. Aplicar Motores
+     apply_motors(robot.pwm_left, robot.pwm_right);
+ 
+-    // 5. Odometria (Cinemática Diferencial)
+-    float v_lin = (WHEEL_RADIUS * 0.5f) * (robot.wr_meas + robot.wl_meas);
+-    float w_ang = (WHEEL_RADIUS / WHEEL_BASE) * (robot.wr_meas - robot.wl_meas);
+-
+-    robot.theta += w_ang * dt;
++    // 5. Odometria (Cinemática Diferencial) direto pelos pulsos (não depende de dt), com o rumo MÉDIO do passo
++    const float ds_l = count_l * ENCODER_PULSE_TO_RAD * WHEEL_RADIUS;
++    const float ds_r = count_r * ENCODER_PULSE_TO_RAD * WHEEL_RADIUS;
++    const float ds = 0.5f * (ds_r + ds_l);
++    const float dtheta = (ds_r - ds_l) / WHEEL_BASE;
++    const float theta_medio = robot.theta + 0.5f * dtheta;
++
++    robot.x += ds * cosf(theta_medio);
++    robot.y += ds * sinf(theta_medio);
++    robot.theta += dtheta;
+     if(robot.theta > M_PI) robot.theta -= 2*M_PI;
+     else if(robot.theta <= -M_PI) robot.theta += 2*M_PI;
+ 
+-    robot.x += v_lin * cosf(robot.theta) * dt;
+-    robot.y += v_lin * sinf(robot.theta) * dt;
+-
+     xSemaphoreGive(robot_mutex);
+ }
+ 
+@@ -926,6 +984,12 @@
          case MQTT_EVENT_CONNECTED:
              ESP_LOGI(TAG_MQTT, "MQTT Connected");
              esp_mqtt_client_publish(mqtt_client, "swarm/robot2/telemetry/status", "Online", 0, 1, 0);
@@ -56,7 +176,7 @@
              xEventGroupSetBits(s_mqtt_event_group, MQTT_CONNECTED_BIT);
              esp_mqtt_client_subscribe(mqtt_client, "swarm/robot2/cmd/wheels", 0);
              esp_mqtt_client_subscribe(mqtt_client, "swarm/robot2/cmd/odometry", 0);
-@@ -990,6 +1025,9 @@
+@@ -990,6 +1054,9 @@
                          
                          robot.wl_ref = v_l;
                          robot.wr_ref = v_r;
@@ -66,7 +186,15 @@
                          xSemaphoreGive(robot_mutex);
                          ESP_LOGI(TAG_MQTT, "Ref update: %.2f, %.2f rad/s", robot.wl_ref, robot.wr_ref);
                      }
-@@ -1046,6 +1084,7 @@
+@@ -1018,6 +1085,7 @@
+                 else if (strncmp(event->topic, "swarm/robot2/cmd/mode", event->topic_len) == 0) {
+                     xSemaphoreTake(robot_mutex, portMAX_DELAY);
+                     robot.wl_ref = 0; robot.wr_ref = 0;
++                    s_wl_cmd = 0; s_wr_cmd = 0;            // parada de emergência: sem rampa
+                     PID_reset(&pid_l); PID_reset(&pid_r);
+                     xSemaphoreGive(robot_mutex);
+                     ESP_LOGW(TAG_STATE, "EMERGENCY STOP RECEIVED");
+@@ -1046,6 +1114,7 @@
              .msg_len = strlen("Offline"),
              .retain = 0
          },
@@ -74,18 +202,85 @@
          .task.priority = 6
      };
      mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
-@@ -1228,7 +1267,9 @@
+@@ -1061,9 +1130,6 @@
+     TickType_t last_log = 0;
+ 
+     while (1) {
+-        struct timeval tv = {0};
+-        gettimeofday(&tv, NULL);
+-        uint64_t capture_ts_us = (uint64_t)tv.tv_sec * 1000000ULL + (uint64_t)tv.tv_usec;
+         camera_fb_t *fb = esp_camera_fb_get();
+         if (!fb) {
+             null_fb++;
+@@ -1075,6 +1141,15 @@
+         }
+ 
+         ok++;
++        // Instante da captura: o driver marca fb->timestamp no início do quadro, no relógio esp_timer (desde o boot).
++        // Converte p/ o relógio de parede (SNTP) pela diferença atual entre os dois relógios. (Antes o horário era
++        // lido ANTES do fb_get, e o quadro devolvido podia ser de um período antes.)
++        struct timeval tv = {0};
++        gettimeofday(&tv, NULL);
++        const int64_t agora_boot_us = esp_timer_get_time();
++        const int64_t fb_boot_us = (int64_t)fb->timestamp.tv_sec * 1000000LL + fb->timestamp.tv_usec;
++        uint64_t capture_ts_us = (uint64_t)tv.tv_sec * 1000000ULL + (uint64_t)tv.tv_usec
++                                 - (uint64_t)(agora_boot_us - fb_boot_us);
+         CameraFrameQueueItem_t item = {
+             .fb = fb,
+             .capture_ts_us = capture_ts_us,
+@@ -1176,6 +1251,9 @@
+                 break;
+             }
+             offset += payload_len;
++            if ((frag + 1) % CAMERA_UDP_FRAGS_POR_PAUSA == 0 && frag + 1 < total_frags) {
++                vTaskDelay(1);                 // deixa a fila do Wi-Fi escoar (e a telemetria MQTT passar)
++            }
+         }
+ 
+         if (frame_ok) {
+@@ -1200,7 +1278,8 @@
+ }
+ 
+ void vTaskPublishOdometry(void *pvParam) {
+-    char json_buffer[128];
++    char json_buffer[224];
++    uint32_t seq = 0;
+     TickType_t xLastWakeTime = xTaskGetTickCount();
+     const TickType_t xFrequency = pdMS_TO_TICKS(PUBLISH_PERIOD_MS);
+     TickType_t last_pub_fail_log = 0;
+@@ -1212,6 +1291,7 @@
+         if (xEventGroupGetBits(s_mqtt_event_group) & MQTT_CONNECTED_BIT) {
+             float x, y, theta, vl, vr;
+             uint64_t odom_ts_us;
++            int64_t tl, tr;
+             
+             // Snapshot rápido dos dados
+             xSemaphoreTake(robot_mutex, portMAX_DELAY);
+@@ -1219,6 +1299,8 @@
+             y = robot.y;
+             theta = robot.theta;
+             odom_ts_us = robot.odom_ts_us;
++            tl = robot.ticks_l;
++            tr = robot.ticks_r;
+             vl = robot.wl_meas; // rad/s (robo.py converte para m/s: v = w * R)
+             vr = robot.wr_meas;
+             xSemaphoreGive(robot_mutex);
+@@ -1226,9 +1308,11 @@
+             // 1. Publica Odometria com timestamp absoluto da amostragem
+             // Mantém o campo legado "odometria" para compatibilidade.
              snprintf(json_buffer, sizeof(json_buffer), 
-                 "{\"odometria\": \"%.4f, %.4f, %.4f\", \"timestamp_us\": %llu}",
-                 x, y, theta, (unsigned long long)odom_ts_us);
+-                "{\"odometria\": \"%.4f, %.4f, %.4f\", \"timestamp_us\": %llu}",
+-                x, y, theta, (unsigned long long)odom_ts_us);
 -            int pub_odom = esp_mqtt_client_publish(mqtt_client, "swarm/robot2/telemetry/odometry", json_buffer, 0, 0, 0);
++                "{\"odometria\": \"%.4f, %.4f, %.4f\", \"timestamp_us\": %llu, \"ticks\": \"%lld, %lld\", \"seq\": %lu}",
++                x, y, theta, (unsigned long long)odom_ts_us, (long long)tl, (long long)tr, (unsigned long)++seq);
 +            // enqueue (não bloqueia): com o Wi-Fi ocupado pelo vídeo, publish travava esta tarefa por segundos e a
 +            // odometria deixava de ser amostrada no ritmo certo
 +            int pub_odom = esp_mqtt_client_enqueue(mqtt_client, "swarm/robot2/telemetry/odometry", json_buffer, 0, 0, 0, true);
              if (pub_odom < 0) {
                  TickType_t now = xTaskGetTickCount();
                  if (now - last_pub_fail_log > pdMS_TO_TICKS(3000)) {
-@@ -1242,7 +1283,7 @@
+@@ -1242,7 +1326,7 @@
              // JSON: {"wheels": "wl, wr"} em rad/s
              snprintf(json_buffer, sizeof(json_buffer), 
                  "{\"wheels\": \"%.3f, %.3f\"}", vl, vr);

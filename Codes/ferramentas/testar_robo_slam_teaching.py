@@ -81,7 +81,7 @@ class Teste:
                 if msg.topic == robo.TOPIC_ODOM:
                     d = json.loads(msg.payload.decode())
                     x, y, th = (float(v) for v in d["odometria"].split(","))
-                    self.msgs["odom"].append((t, x, y, th, d.get("timestamp_us")))
+                    self.msgs["odom"].append((t, x, y, th, d.get("timestamp_us"), d.get("seq"), d.get("ticks")))
                 elif msg.topic == robo.TOPIC_WHEELS:
                     d = json.loads(msg.payload.decode())
                     wl, wr = (float(v) for v in d["wheels"].split(","))
@@ -168,6 +168,14 @@ class Teste:
             self.reg("odometria", "maior intervalo entre mensagens (chegada no PC)",
                      OK if dt.max() < 0.3 else AVISO, f"{1000 * dt.max():.0f} ms",
                      f"mediana {1000 * np.median(dt):.0f} ms; buracos grandes = Wi-Fi")
+        sq = np.array([m[5] for m in od if len(m) > 5 and m[5] is not None], float)
+        if len(sq) > 2:                        # firmware com nº de sequência: perdas exatas
+            ds = np.diff(sq)
+            perd = int(np.sum(ds[ds > 1] - 1))
+            self.reg("odometria", "mensagens perdidas (pelo seq)", OK if perd == 0 else AVISO,
+                     f"{perd} de {int(sq[-1] - sq[0] + 1)}", "firmware novo")
+            self.reg("odometria", "pulsos brutos dos encoders", OK if all(len(m) > 6 and m[6] for m in od) else AVISO,
+                     "presentes" if all(len(m) > 6 and m[6] for m in od) else "ausentes")
         ts = np.array([m[4] for m in od if m[4] is not None], float)
         if len(ts) < 2:
             self.reg("tempo", "timestamp_us da odometria", AVISO, "ausente", "sem o relógio do robô")
