@@ -53,12 +53,14 @@ def main():
                            ate=med, ate_min=lo, ate_max=hi, ate_roda=np.nanmedian(base_roda),
                            var_pct=0.0, fora_da_faixa=False))
         for c, rot in ROTULOS.items():
-            run = os.path.join(seq_dir, c)
-            ate = ler(run, "fusão suavizada")
-            if not np.isfinite(ate):
+            runs = [os.path.join(seq_dir, c)] + sorted(glob.glob(os.path.join(seq_dir, c + "_r[0-9]")))
+            v = np.array([ler(r, "fusão suavizada") for r in runs])
+            v = v[np.isfinite(v)]
+            if not len(v):
                 continue
-            linhas.append(dict(seq=seq, config=c, rotulo=rot, ate=ate, ate_min=np.nan, ate_max=np.nan,
-                               ate_roda=ler(run, "odometria de rodas"), var_pct=100 * (ate / med - 1),
+            ate = float(np.median(v))                    # com repetições: mediana; "fora" = mediana fora da faixa
+            linhas.append(dict(seq=seq, config=c, rotulo=rot, ate=ate, ate_min=v.min(), ate_max=v.max(), n_exec=len(v),
+                               ate_roda=ler(runs[0], "odometria de rodas"), var_pct=100 * (ate / med - 1),
                                fora_da_faixa=bool(ate < lo or ate > hi)))
     if not linhas:
         print("nenhuma execução sens_* encontrada")
@@ -75,9 +77,10 @@ def main():
             return f"{r.ate_roda:.1f}"
         if r.config == "sem perturbação":
             return f"{r.ate:.1f} [{r.ate_min:.1f}-{r.ate_max:.1f}]"
-        return f"{r.ate:.1f}{'*' if r.fora_da_faixa else ''}"
+        faixa = f" [{r.ate_min:.1f}-{r.ate_max:.1f}]" if r.get("n_exec", 1) > 1 else ""
+        return f"{r.ate:.1f}{'*' if r.fora_da_faixa else ''}{faixa}"
 
-    txt = ["ATE da fusão suavizada [m] (* = fora da faixa [mín-máx] das 3 execuções sem perturbação)", ""]
+    txt = ["ATE da fusão suavizada [m]: mediana [mín-máx] das execuções (* = mediana fora da faixa [mín-máx] das 3 execuções sem perturbação)", ""]
     W = 22
     txt.append(f"{'perturbação':28s}" + "".join(f"{s:>{W}s}" for s in seqs) + f"{'var. mediana':>14s}")
     tex = ["% gerado por tabela_sensibilidade.py", "\\begin{tabular}{l" + "r" * (len(seqs) + 1) + "}", "\\toprule",

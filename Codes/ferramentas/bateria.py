@@ -70,6 +70,7 @@ CONFIGS = {
     "sens_atraso_menos50": ["--atraso-roda", "-0.05"],
 }
 SENS = [c for c in CONFIGS if c.startswith("sens_")]
+SENS_REP = [f"{c}_r{k}" for k in (2, 3) for c in SENS]       # repetições (o pipeline não é determinístico)
 N_REP = 3
 FASES = [                                       # (nome, [configurações]) -- em ordem de prioridade
     ("sistema completo (r1)", ["completo_r1"]),
@@ -83,6 +84,7 @@ FASES = [                                       # (nome, [configurações]) -- e
     ("sensibilidade da porta de deriva (replay)", ["porta_deriva"]),
     ("sensibilidade a erros dos sensores", SENS),
     ("repetições do ORB-SLAM3", ["orbslam3_r2", "orbslam3_r3"]),
+    ("repetições da sensibilidade", SENS_REP),
 ]
 ORB_CFGS = ("orbslam3_r1", "orbslam3_r2", "orbslam3_r3")
 REPLAY = ("lacos_falsos", "porta_deriva")                       # replay do grafo gravado (completo_r1.rec)
@@ -175,6 +177,8 @@ class Job:
         if self.cfg in ORB_CFGS:
             return [PY, os.path.join(HERE, "orbslam3_kaist.py"), "rodar", "--images", img, "--out", self.out], env
         cfg = self.cfg.split("_r")[0] if self.cfg.startswith("completo_r") else self.cfg
+        if cfg in SENS_REP:
+            cfg = cfg.rsplit("_r", 1)[0]
         if self.cfg == "completo_r1":
             env["FUSION_RECORD"] = os.path.join(self.base, "completo_r1.rec")
         return [PY, PIPE, "--images", img, "--no-gui", "--out", self.out] + CONFIGS[cfg], env
@@ -205,7 +209,7 @@ def jobs():
                     continue                                     # Inomi: 2,6 m, sem revisitas
                 if cfg in ORB_CFGS and (seq.startswith("dataset") or not orbslam3_disponivel()):
                     continue                                     # só KAIST, e só depois de compilar o ORB-SLAM3
-                if cfg in SENS and seq not in KAIST_AVAL:
+                if (cfg in SENS or cfg in SENS_REP) and seq not in KAIST_AVAL:
                     continue                                     # sensibilidade: só as 6 de avaliação
                 if FILTRO["seqs"] and seq not in FILTRO["seqs"] or FILTRO["configs"] and cfg not in FILTRO["configs"]:
                     continue
