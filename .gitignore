@@ -10,3 +10,6 @@ __pycache__/
 
 # comandos locais (caminhos desta máquina)
 COMANDOS.md
+
+# pendências (anotações pessoais, fora do git)
+PENDENCIAS*.md
