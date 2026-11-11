@@ -311,7 +311,8 @@ inicia tarefas novas depois das 09:30 e continua na noite seguinte de onde parou
 \section{Resultados até a data}
 \label{sec:resultados}
 
-Estado em 10/11/2026: bateria concluída (250 tarefas). Das 30 execuções do ORB-SLAM3, 4 abortaram com erro interno
+Estado em 11/11/2026: 249 de 250 tarefas (falta a porta de deriva da urban32, que roda à noite). Os replays de laços
+falsos e da porta de deriva foram refeitos na noite de 10/11 com o GNC corrigido. Das 30 execuções do ORB-SLAM3, 4 abortaram com erro interno
 do próprio ORB-SLAM3 (\cmd{SO3::exp failed: NaN}) e contam como falha do método.
 
 \subsection{Ablação}
@@ -389,23 +390,28 @@ Em revisitas de sentido oposto, R@1 $\approx 0$ em todas as sequências.
 \toprule
 Configuração & Barrados pela porta & Falsos aceitos (execuções) & Reais mantidos & ATE mediano & Pior ATE \\
 \midrule
-\textbf{Sistema completo} & 5959 (94\,\%) & \textbf{28 (8)} & 87\,\% & \textbf{13,6\,m} & 365\,m \\
-sem porta & 0 & 33 (8) & 71\,\% & 42,7\,m & 318\,m \\
-sem PCM & 5940 & 32 (10) & 80\,\% & 20,0\,m & 328\,m \\
+\textbf{Sistema completo} & 5959 (94\,\%) & \textbf{17 (5)} & 90\,\% & \textbf{12,9\,m} & 329\,m \\
+sem porta & 0 & 51 (10) & 92\,\% & 12,9\,m & 365\,m \\
+sem PCM & 5940 & 34 (12) & 83\,\% & 20,0\,m & 328\,m \\
 sem GNC-TLS & 5959 & 82 (27) & 91\,\% & 22,9\,m & 563\,m \\
 \textbf{sem nenhuma rejeição} & 0 & \textbf{5290 (103)} & 96\,\% & \textbf{527\,m} & diverge \\
-GNC antigo & 5959 & 27 (9) & 92\,\% & 12,9\,m & 377\,m \\
+GNC antigo & 5959 & 28 (10) & 92\,\% & 12,9\,m & 377\,m \\
 \bottomrule
 \end{tabular}}
 \end{table}
 \begin{itemize}
   \item Sem rejeição, o sistema aceita 83\,\% dos laços falsos e o ATE mediano vai a 527\,m (com casos de divergência
-        do solver). Com as três camadas, 0,4\,\% entram e o ATE mediano fica no valor sem injeção.
-  \item A porta barra 94\,\%; o GNC pega a maior parte do resto (sem ele, aceitos 28 $\to$ 82); o PCM protege os laços
-        reais (80 $\to$ 87\,\% mantidos).
-  \item \textbf{GNC novo $\times$ antigo: empate} (27 contra 28 aceitos). O novo tem um modo de falha próprio, em
-        investigação: em urban39 rejeitou todos os 54 laços reais (ATE 109\,m).
-  \item O pior caso é igual nas duas versões: urban33, 100 laços em grupos ($\sim$370\,m). Sem nenhum laço real
+        do solver). Com as três camadas, 0,3\,\% entram e o ATE mediano fica no valor sem injeção.
+  \item A porta barra 94\,\%; o GNC pega a maior parte do resto (sem ele, aceitos 17 $\to$ 82); o PCM protege os laços
+        reais (83 $\to$ 90\,\% mantidos). Sem a porta, o GNC ainda segura o ATE mediano, mas o número de falsos aceitos
+        triplica (17 $\to$ 51) e há 15 execuções com erro do solver.
+  \item \textbf{GNC novo $\times$ antigo: o novo vence} (17 em 5 execuções contra 28 em 10; pior caso 329 contra 377\,m).
+        A primeira versão do GNC novo empatava (28 aceitos) por um defeito corrigido em 10/11: partia do mínimos
+        quadrados com todos os candidatos e parava quando os pesos estavam todos em zero; em urban39 rejeitava todos os
+        laços reais (ATE 109\,m). Agora parte da odometria mais a clique do PCM e só para depois de recozer
+        ($\mu\geq10$); em urban39 mantém os mesmos 641 de 702 laços reais que o GNC antigo (pior ATE 35\,m). Sem
+        injeção (n = 0) o resultado é idêntico ao da versão anterior em todas as sequências, então a ablação não muda.
+  \item O pior caso das duas versões é o mesmo: urban33, 100 laços em grupos (329--377\,m). Sem nenhum laço real
         (revisitas só em sentido oposto), grupos consistentes de laços falsos não têm com o que competir.
 \end{itemize}
 \begin{figure}[H]\centering
@@ -425,22 +431,23 @@ perturbação, a marca ``fora da faixa'' aparece com frequência sem efeito real
 
 \subsection{Sensibilidade da porta de deriva}
 \begin{table}[H]\centering\small
-\caption{Porta de deriva variada no replay (8 sequências com revisita; 8 execuções sem injeção e 64 com injeção
-de 10 e 50 laços falsos por configuração).}
+\caption{Porta de deriva variada no replay, com o GNC corrigido (7 das 8 sequências com revisita; urban32, sem
+laço real, roda na noite de 11/11; 7 execuções sem injeção e 56 com injeção de 10 e 50 laços falsos por configuração).}
 \begin{tabular}{lrrrr}
 \toprule
 Porta & Reais mantidos (sem injeção) & Falsos barrados & Falsos aceitos & Execuções com falha \\
 \midrule
-\textbf{15\,m + 10\,\% (padrão)} & \textbf{95,8\,\%} & 92,1\,\% & 21 & 7 de 64 \\
-15\,m + 5\,\% & 81,7\,\% & 97,2\,\% & 21 & 12 \\
-15\,m + 20\,\% & 95,8\,\% & 81,9\,\% & 34 & 14 \\
-5\,m + 10\,\% & 95,8\,\% & 92,3\,\% & 16 & 6 \\
-30\,m + 10\,\% & 95,8\,\% & 91,8\,\% & 22 & 7 \\
+\textbf{15\,m + 10\,\% (padrão)} & \textbf{96,0\,\%} & 90,9\,\% & 10 & 2 de 56 \\
+15\,m + 5\,\% & 83,8\,\% & 96,8\,\% & 5 & 9 \\
+15\,m + 20\,\% & 96,0\,\% & 79,4\,\% & 25 & 7 \\
+5\,m + 10\,\% & 96,0\,\% & 91,2\,\% & 10 & 2 \\
+30\,m + 10\,\% & 96,0\,\% & 90,7\,\% & 10 & 2 \\
 \bottomrule
 \end{tabular}
 \end{table}
 O termo proporcional de 10\,\% cobre a pior deriva medida da roda (8,6\,\%): com 5\,\% a porta barra laços verdadeiros
-(urban30 perde todos e vai a 79\,m); com 20\,\% entram mais laços falsos e as falhas dobram. O termo fixo (5, 15 ou
+(urban30 perde todos e vai a 79\,m); com 20\,\% entram 2,5 vezes mais laços falsos e as falhas triplicam (2 $\to$ 7). Com o GNC corrigido, as falhas da
+configuração padrão caíram de 7 para 2 em 56 execuções. O termo fixo (5, 15 ou
 30\,m) quase não importa, porque nos laços com centenas de metros entre as passagens quem manda é o termo proporcional.
 
 \subsection{Comparação com o ORB-SLAM3}
