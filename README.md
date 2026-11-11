@@ -1,6 +1,6 @@
 # Odometria visual monocular com fusão em grafo de fatores e fechamento de laço
 
-Código da dissertação de mestrado de José Igo. O sistema estima a trajetória de um veículo a partir de **uma única
+O sistema estima a trajetória de um veículo a partir de **uma única
 câmera**, combinada com a **odometria de roda** (e, opcionalmente, uma IMU) num **grafo de fatores** otimizado de
 forma incremental, com **fechamento de laço** para corrigir a deriva acumulada quando o veículo revisita um lugar.
 Todo o processamento roda mais rápido que o tempo real.
