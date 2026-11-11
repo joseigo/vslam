@@ -1,6 +1,14 @@
 --- a/firmware/main/main.c	2026-11-11 14:14:40.239730093 -0300
-+++ b/firmware/main/main.c	2026-11-11 14:14:40.240730090 -0300
-@@ -135,13 +135,16 @@
++++ b/firmware/main/main.c	2026-11-11 14:44:11.396300118 -0300
+@@ -4,6 +4,7 @@
+ #include "driver/gpio.h"
+ #include "driver/ledc.h"
+ #include <string.h>
++#include <errno.h>
+ #include <esp_wifi.h>
+ #include "esp_event.h"
+ #include "nvs_flash.h"
+@@ -135,13 +136,16 @@
  
  #define PUBLISH_PERIOD_MS       100
  
@@ -18,7 +26,7 @@
  
  // ---------------------------------------------------------------------- TYPES
  typedef struct {
-@@ -162,6 +165,8 @@
+@@ -162,6 +166,8 @@
      float y;                // m
      float theta;            // rad
      uint64_t odom_ts_us;    // timestamp da amostragem usada no cálculo
@@ -27,7 +35,7 @@
  
      // --- Controle ---
      float pwm_left;
-@@ -324,8 +329,8 @@
+@@ -324,8 +330,8 @@
  
          .frame_size = FRAMESIZE_VGA,
          .jpeg_quality = CAMERA_JPEG_QUALITY,
@@ -38,7 +46,7 @@
          .fb_location = CAMERA_FB_IN_PSRAM,
      };
  
-@@ -347,7 +352,7 @@
+@@ -347,7 +353,7 @@
      } else {
          ESP_LOGW(TAG_CAM, "esp_camera_sensor_get() retornou NULL");
      }
@@ -47,7 +55,7 @@
               (unsigned long)CAMERA_XCLK_HZ, CAMERA_JPEG_QUALITY);
      return ESP_OK;
  }
-@@ -635,6 +640,39 @@
+@@ -635,6 +641,39 @@
  }
  // ------------------------------------------- SUPERVISOR FUNCTIONS
  
@@ -87,7 +95,7 @@
  void control_timer_callback(void* arg) {
      if (!s_control_active) {
          return;
-@@ -645,6 +683,12 @@
+@@ -645,6 +684,12 @@
          return;
      }
  
@@ -100,7 +108,7 @@
      int count_l = 0, count_r = 0;
      pcnt_unit_get_count(enc_left, &count_l);
      pcnt_unit_get_count(enc_right, &count_r);
-@@ -654,36 +698,50 @@
+@@ -654,36 +699,50 @@
      robot.enc_left_delta = count_l;
      robot.enc_right_delta = count_r;
  
@@ -163,7 +171,7 @@
      xSemaphoreGive(robot_mutex);
  }
  
-@@ -926,6 +984,12 @@
+@@ -926,6 +985,12 @@
          case MQTT_EVENT_CONNECTED:
              ESP_LOGI(TAG_MQTT, "MQTT Connected");
              esp_mqtt_client_publish(mqtt_client, "swarm/robot2/telemetry/status", "Online", 0, 1, 0);
@@ -176,7 +184,7 @@
              xEventGroupSetBits(s_mqtt_event_group, MQTT_CONNECTED_BIT);
              esp_mqtt_client_subscribe(mqtt_client, "swarm/robot2/cmd/wheels", 0);
              esp_mqtt_client_subscribe(mqtt_client, "swarm/robot2/cmd/odometry", 0);
-@@ -990,6 +1054,9 @@
+@@ -990,6 +1055,9 @@
                          
                          robot.wl_ref = v_l;
                          robot.wr_ref = v_r;
@@ -186,7 +194,7 @@
                          xSemaphoreGive(robot_mutex);
                          ESP_LOGI(TAG_MQTT, "Ref update: %.2f, %.2f rad/s", robot.wl_ref, robot.wr_ref);
                      }
-@@ -1018,6 +1085,7 @@
+@@ -1018,6 +1086,7 @@
                  else if (strncmp(event->topic, "swarm/robot2/cmd/mode", event->topic_len) == 0) {
                      xSemaphoreTake(robot_mutex, portMAX_DELAY);
                      robot.wl_ref = 0; robot.wr_ref = 0;
@@ -194,14 +202,6 @@
                      PID_reset(&pid_l); PID_reset(&pid_r);
                      xSemaphoreGive(robot_mutex);
                      ESP_LOGW(TAG_STATE, "EMERGENCY STOP RECEIVED");
-@@ -1046,6 +1114,7 @@
-             .msg_len = strlen("Offline"),
-             .retain = 0
-         },
-+        .outbox.limit = 32768,      // telemetria enfileirada (enqueue): não cresce sem limite se a rede travar
-         .task.priority = 6
-     };
-     mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
 @@ -1061,9 +1130,6 @@
      TickType_t last_log = 0;
  
@@ -228,7 +228,53 @@
          CameraFrameQueueItem_t item = {
              .fb = fb,
              .capture_ts_us = capture_ts_us,
-@@ -1176,6 +1251,9 @@
+@@ -1106,6 +1181,8 @@
+     const size_t max_payload = CAMERA_UDP_MAX_PAYLOAD;
+     int sock = -1;
+     TickType_t last_log = 0;
++    int64_t ultimo_envio_us = 0;
++    uint32_t intervalo_ms = CAMERA_CAPTURE_PERIOD_MS;
+ 
+     ESP_LOGI(TAG_CAM, "udp_stream_task iniciada (%dfps, payload=%u)",
+              CAMERA_STREAM_FPS, CAMERA_UDP_MAX_PAYLOAD);
+@@ -1131,6 +1208,13 @@
+             continue;
+         }
+ 
++        // Taxa adaptativa: depois de um quadro que não coube no link, espera mais antes do próximo (até 2 s);
++        // cada quadro enviado encurta o intervalo. Assim o vídeo não toma o Wi-Fi da telemetria.
++        if (esp_timer_get_time() - ultimo_envio_us < (int64_t)intervalo_ms * 1000) {
++            esp_camera_fb_return(fb);
++            continue;
++        }
++
+         if (sock < 0) {
+             sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+             if (sock < 0) {
+@@ -1167,31 +1251,51 @@
+             memcpy(packet, &hdr, sizeof(hdr));
+             memcpy(packet + sizeof(hdr), fb->buf + offset, payload_len);
+ 
+-            ssize_t sent = sendto(sock, packet, sizeof(hdr) + payload_len, 0,
+-                                  (struct sockaddr *)&dest_snapshot.addr, dest_snapshot.addr_len);
++            ssize_t sent = -1;
++            for (int tent = 0; tent < 4 && sent < 0; tent++) {     // fila do Wi-Fi cheia: espera e reenvia
++                sent = sendto(sock, packet, sizeof(hdr) + payload_len, 0,
++                              (struct sockaddr *)&dest_snapshot.addr, dest_snapshot.addr_len);
++                if (sent < 0 && (errno == ENOMEM || errno == EAGAIN || errno == ENOBUFS)) {
++                    vTaskDelay(2);
++                } else if (sent < 0) {
++                    break;
++                }
++            }
+             if (sent < 0) {
+                 frame_ok = false;
+-                close(sock);
+-                sock = -1;
++                if (errno != ENOMEM && errno != EAGAIN && errno != ENOBUFS) {   // erro de socket: reabre
++                    close(sock);
++                    sock = -1;
++                }
                  break;
              }
              offset += payload_len;
@@ -237,55 +283,156 @@
 +            }
          }
  
++        ultimo_envio_us = esp_timer_get_time();
          if (frame_ok) {
-@@ -1200,7 +1278,8 @@
+             sent_frames++;
++            if (intervalo_ms > CAMERA_CAPTURE_PERIOD_MS) intervalo_ms -= 20;
++            if (intervalo_ms < CAMERA_CAPTURE_PERIOD_MS) intervalo_ms = CAMERA_CAPTURE_PERIOD_MS;
+         } else {
+             dropped_frames++;
++            intervalo_ms = (intervalo_ms * 2 > 2000) ? 2000 : intervalo_ms * 2;
+         }
+ 
+         TickType_t now = xTaskGetTickCount();
+         if (sent_frames == 1u || now - last_log >= pdMS_TO_TICKS(5000)) {
+-            ESP_LOGI(TAG_CAM, "udp: sent=%lu drop=%lu frame=%lu bytes=%u frags=%u",
++            wifi_ap_record_t ap = {0};
++            int rssi = (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) ? ap.rssi : 0;
++            ESP_LOGI(TAG_CAM, "udp: sent=%lu drop=%lu frame=%lu bytes=%u frags=%u intervalo=%lums rssi=%ddBm",
+                      (unsigned long)sent_frames,
+                      (unsigned long)dropped_frames,
+                      (unsigned long)frame_id,
+                      (unsigned int)fb->len,
+-                     (unsigned int)total_frags);
++                     (unsigned int)total_frags,
++                     (unsigned long)intervalo_ms, rssi);
+             last_log = now;
+         }
+ 
+@@ -1199,57 +1303,72 @@
+     }
  }
  
- void vTaskPublishOdometry(void *pvParam) {
+-void vTaskPublishOdometry(void *pvParam) {
 -    char json_buffer[128];
-+    char json_buffer[224];
++// Telemetria em duas tarefas: a AMOSTRAGEM (10 Hz, relógio do robô) nunca espera a rede; o ENVIO publica da fila.
++// Com o Wi-Fi ocupado, o envio atrasa (e despeja a fila depois), mas as amostras continuam regulares; se a fila
++// encher, a mais antiga é descartada e o "seq" mostra a perda. (esp_mqtt_client_enqueue não serve: a tarefa do MQTT
++// esvazia a outbox a ~1 mensagem/s.)
++typedef struct {
++    float x, y, theta, vl, vr;
++    uint64_t ts_us;
++    int64_t tl, tr;
++    uint32_t seq;
++} TelemetriaAmostra_t;
++
++#define TELEMETRIA_FILA 64          // 6,4 s de amostras
++static QueueHandle_t s_telemetria_fila;
++
++void vTaskPublishOdometry(void *pvParam) {        // amostragem
 +    uint32_t seq = 0;
      TickType_t xLastWakeTime = xTaskGetTickCount();
      const TickType_t xFrequency = pdMS_TO_TICKS(PUBLISH_PERIOD_MS);
-     TickType_t last_pub_fail_log = 0;
-@@ -1212,6 +1291,7 @@
-         if (xEventGroupGetBits(s_mqtt_event_group) & MQTT_CONNECTED_BIT) {
-             float x, y, theta, vl, vr;
-             uint64_t odom_ts_us;
-+            int64_t tl, tr;
-             
-             // Snapshot rápido dos dados
-             xSemaphoreTake(robot_mutex, portMAX_DELAY);
-@@ -1219,6 +1299,8 @@
-             y = robot.y;
-             theta = robot.theta;
-             odom_ts_us = robot.odom_ts_us;
-+            tl = robot.ticks_l;
-+            tr = robot.ticks_r;
-             vl = robot.wl_meas; // rad/s (robo.py converte para m/s: v = w * R)
-             vr = robot.wr_meas;
-             xSemaphoreGive(robot_mutex);
-@@ -1226,9 +1308,11 @@
-             // 1. Publica Odometria com timestamp absoluto da amostragem
-             // Mantém o campo legado "odometria" para compatibilidade.
-             snprintf(json_buffer, sizeof(json_buffer), 
+-    TickType_t last_pub_fail_log = 0;
+ 
+     while (1) {
+         vTaskDelayUntil(&xLastWakeTime, xFrequency);
++        TelemetriaAmostra_t a;
++        xSemaphoreTake(robot_mutex, portMAX_DELAY);
++        a.x = robot.x; a.y = robot.y; a.theta = robot.theta;
++        a.ts_us = robot.odom_ts_us;
++        a.tl = robot.ticks_l; a.tr = robot.ticks_r;
++        a.vl = robot.wl_meas; a.vr = robot.wr_meas;      // rad/s (robo.py converte para m/s: v = w * R)
++        xSemaphoreGive(robot_mutex);
++        a.seq = ++seq;
++        if (xQueueSend(s_telemetria_fila, &a, 0) != pdTRUE) {
++            TelemetriaAmostra_t velha;
++            xQueueReceive(s_telemetria_fila, &velha, 0);  // fila cheia: descarta a mais antiga
++            xQueueSend(s_telemetria_fila, &a, 0);
++        }
++    }
++}
+ 
+-        // Verifica conexão MQTT
+-        if (xEventGroupGetBits(s_mqtt_event_group) & MQTT_CONNECTED_BIT) {
+-            float x, y, theta, vl, vr;
+-            uint64_t odom_ts_us;
+-            
+-            // Snapshot rápido dos dados
+-            xSemaphoreTake(robot_mutex, portMAX_DELAY);
+-            x = robot.x;
+-            y = robot.y;
+-            theta = robot.theta;
+-            odom_ts_us = robot.odom_ts_us;
+-            vl = robot.wl_meas; // rad/s (robo.py converte para m/s: v = w * R)
+-            vr = robot.wr_meas;
+-            xSemaphoreGive(robot_mutex);
+-
+-            // 1. Publica Odometria com timestamp absoluto da amostragem
+-            // Mantém o campo legado "odometria" para compatibilidade.
+-            snprintf(json_buffer, sizeof(json_buffer), 
 -                "{\"odometria\": \"%.4f, %.4f, %.4f\", \"timestamp_us\": %llu}",
 -                x, y, theta, (unsigned long long)odom_ts_us);
 -            int pub_odom = esp_mqtt_client_publish(mqtt_client, "swarm/robot2/telemetry/odometry", json_buffer, 0, 0, 0);
-+                "{\"odometria\": \"%.4f, %.4f, %.4f\", \"timestamp_us\": %llu, \"ticks\": \"%lld, %lld\", \"seq\": %lu}",
-+                x, y, theta, (unsigned long long)odom_ts_us, (long long)tl, (long long)tr, (unsigned long)++seq);
-+            // enqueue (não bloqueia): com o Wi-Fi ocupado pelo vídeo, publish travava esta tarefa por segundos e a
-+            // odometria deixava de ser amostrada no ritmo certo
-+            int pub_odom = esp_mqtt_client_enqueue(mqtt_client, "swarm/robot2/telemetry/odometry", json_buffer, 0, 0, 0, true);
-             if (pub_odom < 0) {
-                 TickType_t now = xTaskGetTickCount();
-                 if (now - last_pub_fail_log > pdMS_TO_TICKS(3000)) {
-@@ -1242,7 +1326,7 @@
-             // JSON: {"wheels": "wl, wr"} em rad/s
-             snprintf(json_buffer, sizeof(json_buffer), 
-                 "{\"wheels\": \"%.3f, %.3f\"}", vl, vr);
+-            if (pub_odom < 0) {
+-                TickType_t now = xTaskGetTickCount();
+-                if (now - last_pub_fail_log > pdMS_TO_TICKS(3000)) {
+-                    ESP_LOGW(TAG_MQTT, "Falha publish odometry (client possivelmente desconectado)");
+-                    last_pub_fail_log = now;
+-                }
+-                continue;
+-            }
++void vTaskEnviaTelemetria(void *pvParam) {        // envio (pode bloquear na rede sem afetar a amostragem)
++    char json_buffer[224];
++    TickType_t last_pub_fail_log = 0;
++    TelemetriaAmostra_t a;
+ 
+-            // 2. Publica Velocidades
+-            // JSON: {"wheels": "wl, wr"} em rad/s
+-            snprintf(json_buffer, sizeof(json_buffer), 
+-                "{\"wheels\": \"%.3f, %.3f\"}", vl, vr);
 -            int pub_wheels = esp_mqtt_client_publish(mqtt_client, "swarm/robot2/telemetry/wheels", json_buffer, 0, 0, 0);
-+            int pub_wheels = esp_mqtt_client_enqueue(mqtt_client, "swarm/robot2/telemetry/wheels", json_buffer, 0, 0, 0, true);
-             if (pub_wheels < 0) {
-                 TickType_t now = xTaskGetTickCount();
-                 if (now - last_pub_fail_log > pdMS_TO_TICKS(3000)) {
+-            if (pub_wheels < 0) {
+-                TickType_t now = xTaskGetTickCount();
+-                if (now - last_pub_fail_log > pdMS_TO_TICKS(3000)) {
+-                    ESP_LOGW(TAG_MQTT, "Falha publish wheels (client possivelmente desconectado)");
+-                    last_pub_fail_log = now;
+-                }
++    while (1) {
++        // Sem conexão, não tira nada da fila (as amostras esperam a reconexão; a fila guarda ~6 s)
++        xEventGroupWaitBits(s_mqtt_event_group, MQTT_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
++        if (xQueueReceive(s_telemetria_fila, &a, pdMS_TO_TICKS(500)) != pdTRUE) {
++            continue;
++        }
++        // Mantém o campo legado "odometria" para compatibilidade; "ticks" e "seq" são novos.
++        snprintf(json_buffer, sizeof(json_buffer),
++            "{\"odometria\": \"%.4f, %.4f, %.4f\", \"timestamp_us\": %llu, \"ticks\": \"%lld, %lld\", \"seq\": %lu}",
++            a.x, a.y, a.theta, (unsigned long long)a.ts_us, (long long)a.tl, (long long)a.tr, (unsigned long)a.seq);
++        int pub_odom = esp_mqtt_client_publish(mqtt_client, "swarm/robot2/telemetry/odometry", json_buffer, 0, 0, 0);
++
++        // JSON: {"wheels": "wl, wr"} em rad/s
++        snprintf(json_buffer, sizeof(json_buffer), "{\"wheels\": \"%.3f, %.3f\"}", a.vl, a.vr);
++        int pub_wheels = esp_mqtt_client_publish(mqtt_client, "swarm/robot2/telemetry/wheels", json_buffer, 0, 0, 0);
++
++        if (pub_odom < 0 || pub_wheels < 0) {
++            TickType_t now = xTaskGetTickCount();
++            if (now - last_pub_fail_log > pdMS_TO_TICKS(3000)) {
++                ESP_LOGW(TAG_MQTT, "Falha publish telemetria (client possivelmente desconectado)");
++                last_pub_fail_log = now;
+             }
++            xQueueSendToFront(s_telemetria_fila, &a, 0);   // devolve a amostra (sai de novo após reconectar)
++            vTaskDelay(pdMS_TO_TICKS(200));
+         }
+     }
+ }
+@@ -1384,6 +1503,10 @@
+     ESP_ERROR_CHECK(esp_timer_start_periodic(control_timer, SAMPLING_PERIOD_MS * 1000)); // em us
+ 
+     // 4. Cria task de Publicação MQTT
++    if (s_telemetria_fila == NULL) {
++        s_telemetria_fila = xQueueCreate(TELEMETRIA_FILA, sizeof(TelemetriaAmostra_t));
++        xTaskCreate(vTaskEnviaTelemetria, "envia_telem", 4096, NULL, 5, NULL);
++    }
+     xTaskCreate(vTaskPublishOdometry, "pub_odom", 4096, NULL, 6, NULL);
+ 
+     // Loop infinito apenas para manter a task viva
