@@ -44,7 +44,7 @@ RETANGULO = [(0.25, 0.0), (1.30, 0.0), (1.30, 1.50), (0.25, 1.50)]       # anti-
 GRAVATA = [(0.25, 0.0), (1.30, 1.50), (0.25, 1.50), (1.30, 0.0)]         # diagonais cruzando no centro
 THETA_OFFSET = -0.079                          # rad, medido pelo testar_robo_slam_teaching.py em 2026-11-10
 DIST_MESA_MIN, MARGEM_MIN, GT_MAX_IDADE = 0.20, 0.15, 0.5
-TTL_MS = 400                                   # prazo de cada comando de roda (firmware com o patch)
+TTL_MS = 1000                                   # prazo de cada comando de roda (firmware com o patch)
 WHEEL_BASE, V_RODA_MAX = 0.143, 0.25
 
 
@@ -379,7 +379,7 @@ class Percurso:
         th = np.unwrap(O[:, 3])
         with open(os.path.join(out, "data_sensor", "odometria_dataset.csv"), "w") as fh:
             fh.write("timestamp,x,y,theta,image\n")
-            for (_, x, y, _, tr), t in zip(O, th):
+            for (_, x, y, _, tr, *_), t in zip(O, th):
                 fh.write(f"{int(round(tr * 1e9))},{x:.6f},{y:.6f},{t:.6f},\n")
         f = os.path.join(out, "poses_gt_unix.csv")
         L = open(f).read().splitlines()
@@ -408,11 +408,21 @@ class Percurso:
             th = np.r_[0, np.cumsum(dth)]
             thm = th[:-1] + dth / 2
             return np.r_[0, np.cumsum(ds * np.cos(thm))], np.r_[0, np.cumsum(ds * np.sin(thm))], th
-        g = G[ok]
-        dist_gt = np.sum(np.hypot(np.diff(g[:, 1]), np.diff(g[:, 2])))
-        giro_gt = np.abs(np.diff(np.unwrap(g[:, 3]))).sum()
-        dist_od = raio * np.sum(np.abs(dl + dr) / 2)
-        giro_od = np.abs(raio * (dr - dl) / bitola).sum()
+        # Compara em trechos de 0,5 s: somar |Δ| amostra a amostra do GT (17 Hz) acumula o ruído como se fosse
+        # movimento. Em cada trecho: distância = corda, giro = Δθ líquido; soma-se o módulo dos trechos.
+        tb = np.arange(max(t[0], tg[ok][0]), min(t[-1], tg[ok][-1]), 0.5)
+        if len(tb) < 10:
+            return
+        gx, gy = np.interp(tb, tg, G[:, 1]), np.interp(tb, tg, G[:, 2])
+        gth = np.interp(tb, tg, np.unwrap(G[:, 3]))
+        cl, cr = np.interp(tb, O[:, 4], O[:, 5]) * k, np.interp(tb, O[:, 4], O[:, 6]) * k   # pulsos -> rad
+        dist_gt = np.sum(np.hypot(np.diff(gx), np.diff(gy)))
+        dist_od = raio * np.sum(np.abs(np.diff(cl) + np.diff(cr)) / 2)
+        # giro: regressão do ângulo ACUMULADO (θ odometria x θ GT, desde o início): o GT é medida absoluta (o ruído
+        # não acumula) e um desalinhamento de tempo de ~0,4 s pesa pouco num ângulo que vai a centenas de graus
+        ag = gth - gth[0]
+        ao = raio * ((cr - cr[0]) - (cl - cl[0])) / bitola
+        giro_gt, giro_od = float(np.dot(ag, ag)), float(np.dot(ao, ag))
         raio_aj = raio * dist_gt / max(dist_od, 1e-9)
         bitola_aj = bitola * (raio_aj / raio) * giro_od / max(giro_gt, 1e-9)
         self.log(f"pulsos brutos: distância GT/odometria {dist_gt / max(dist_od, 1e-9):.3f}, giro odometria/GT "
