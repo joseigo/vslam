@@ -311,7 +311,7 @@ inicia tarefas novas depois das 09:30 e continua na noite seguinte de onde parou
 \section{Resultados até a data}
 \label{sec:resultados}
 
-Estado em 11/11/2026: 249 de 250 tarefas (falta a porta de deriva da urban32, que roda à noite). Os replays de laços
+Estado em 11/11/2026: bateria concluída (250 tarefas). Os replays de laços
 falsos e da porta de deriva foram refeitos na noite de 10/11 com o GNC corrigido. Das 30 execuções do ORB-SLAM3, 4 abortaram com erro interno
 do próprio ORB-SLAM3 (\cmd{SO3::exp failed: NaN}) e contam como falha do método.
 
@@ -431,23 +431,23 @@ perturbação, a marca ``fora da faixa'' aparece com frequência sem efeito real
 
 \subsection{Sensibilidade da porta de deriva}
 \begin{table}[H]\centering\small
-\caption{Porta de deriva variada no replay, com o GNC corrigido (7 das 8 sequências com revisita; urban32, sem
-laço real, roda na noite de 11/11; 7 execuções sem injeção e 56 com injeção de 10 e 50 laços falsos por configuração).}
+\caption{Porta de deriva variada no replay, com o GNC corrigido (8 sequências com revisita; 8 execuções sem injeção
+e 64 com injeção de 10 e 50 laços falsos por configuração).}
 \begin{tabular}{lrrrr}
 \toprule
 Porta & Reais mantidos (sem injeção) & Falsos barrados & Falsos aceitos & Execuções com falha \\
 \midrule
-\textbf{15\,m + 10\,\% (padrão)} & \textbf{96,0\,\%} & 90,9\,\% & 10 & 2 de 56 \\
-15\,m + 5\,\% & 83,8\,\% & 96,8\,\% & 5 & 9 \\
-15\,m + 20\,\% & 96,0\,\% & 79,4\,\% & 25 & 7 \\
-5\,m + 10\,\% & 96,0\,\% & 91,2\,\% & 10 & 2 \\
-30\,m + 10\,\% & 96,0\,\% & 90,7\,\% & 10 & 2 \\
+\textbf{15\,m + 10\,\% (padrão)} & \textbf{95,8\,\%} & 92,1\,\% & 10 & 2 de 64 \\
+15\,m + 5\,\% & 81,7\,\% & 97,2\,\% & 5 & 9 \\
+15\,m + 20\,\% & 95,8\,\% & 81,9\,\% & 25 & 7 \\
+5\,m + 10\,\% & 95,8\,\% & 92,3\,\% & 10 & 2 \\
+30\,m + 10\,\% & 95,8\,\% & 91,8\,\% & 10 & 2 \\
 \bottomrule
 \end{tabular}
 \end{table}
 O termo proporcional de 10\,\% cobre a pior deriva medida da roda (8,6\,\%): com 5\,\% a porta barra laços verdadeiros
 (urban30 perde todos e vai a 79\,m); com 20\,\% entram 2,5 vezes mais laços falsos e as falhas triplicam (2 $\to$ 7). Com o GNC corrigido, as falhas da
-configuração padrão caíram de 7 para 2 em 56 execuções. O termo fixo (5, 15 ou
+configuração padrão caíram de 7 para 2 em 64 execuções. O termo fixo (5, 15 ou
 30\,m) quase não importa, porque nos laços com centenas de metros entre as passagens quem manda é o termo proporcional.
 
 \subsection{Comparação com o ORB-SLAM3}
