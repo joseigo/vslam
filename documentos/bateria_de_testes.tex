@@ -242,8 +242,8 @@ Limitação: o replay não realimenta o VO com o grafo perturbado; mede só o ef
 \subsection{Sensibilidade a erros dos sensores}
 Sistema completo nas 6 sequências de avaliação com perturbações deliberadas da calibração (opções
 \cmd{--enc-escala}, \cmd{--altura-delta}, \cmd{--atraso-roda}): diâmetro das rodas $\pm2$\,\%, altura da câmera
-$\pm5$\,cm e atraso roda-câmera $\pm50$\,ms. Uma execução por perturbação, comparada com a faixa das 3 repetições sem
-perturbação.
+$\pm5$\,cm e atraso roda-câmera $\pm50$\,ms. Três execuções por perturbação (mediana [mín--máx]), comparadas com a
+faixa das 3 repetições sem perturbação.
 
 \subsection{Sensibilidade da porta de deriva}
 \label{sec:porta}
@@ -421,13 +421,14 @@ GNC antigo & 5959 & 28 (10) & 92\,\% & 12,9\,m & 377\,m \\
 
 \subsection{Sensibilidade a erros dos sensores}
 \begin{table}[H]\centering
-\caption{ATE [m] com cada perturbação ($^*$ = fora da faixa das 3 execuções sem perturbação). Gerada pela bateria.}
+\caption{ATE [m] com cada perturbação: mediana [mín--máx] de 3 execuções ($^*$ = mediana fora da faixa das 3
+execuções sem perturbação, para mais ou para menos). Gerada pela bateria.}
 \tabelagerada{\sint/sensibilidade/sensibilidade.tex}{\linewidth}
 \end{table}
-O erro de escala do encoder é o que pesa: com +2\,\%, o ATE piora claramente em 4 das 6 sequências (mediana +47\,\%),
-porque a roda é a única fonte de escala métrica. Altura $\pm5$\,cm e atraso $\pm50$\,ms ficam dentro da variação normal
-(exceção a repetir: urban38 com +5\,cm, 162\,m numa execução). Cautela: com 3 execuções de referência e 1 por
-perturbação, a marca ``fora da faixa'' aparece com frequência sem efeito real.
+Só o erro de escala do encoder tem efeito sistemático: com +2\,\%, o ATE piora em 4 das 6 sequências (mediana
++25\,\%); com $-2$\,\%, em 3 (+7\,\%). A roda é a única fonte de escala métrica. Altura $\pm5$\,cm e atraso
+$\pm50$\,ms não pioram o sistema (variação mediana de $-9$ a $-6$\,\%, com tantos casos melhores quanto piores). Os
+162\,m da urban38 com altura +5\,cm foram azar de uma execução: as outras duas deram 13 e 20\,m.
 
 \subsection{Sensibilidade da porta de deriva}
 \begin{table}[H]\centering\small
